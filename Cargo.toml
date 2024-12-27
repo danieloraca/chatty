@@ -1,0 +1,10 @@
+[package]
+name = "chatty"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+surrealdb = "2.1.4"
+kalosm = "0.3.2"
