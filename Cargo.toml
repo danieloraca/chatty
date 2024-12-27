@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+serde = { version = "1.0.217", features = ["derive"] }
 surrealdb = "2.1.4"
-kalosm = "0.3.2"
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = 'abort'
+codegen-units = 1
