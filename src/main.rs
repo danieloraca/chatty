@@ -11,6 +11,14 @@ use std::sync::LazyLock;
 use axum::{Router, routing::{delete, get, post, put}};
 use surrealdb::{engine::remote::ws::{Client, Ws}};
 use tokio::net::TcpListener;
+use std::net::SocketAddr;
+// use hyper::server;
+
+use axum::{
+    extract::ws::{WebSocket, Message, WebSocketUpgrade},
+    response::IntoResponse,
+};
+use tokio::sync::mpsc;
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
@@ -149,80 +157,27 @@ mod routes {
     }
 }
 
-// #[derive(Debug, Serialize)]
-// struct Name<'a> {
-//     first: &'a str,
-//     last: &'a str,
-// }
+async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_socket)
+}
 
-// #[derive(Debug, Serialize)]
-// struct Person<'a> {
-//     title: &'a str,
-//     name: Name<'a>,
-//     marketing: bool,
-// }
+async fn handle_socket(mut socket: WebSocket) {
+    println!("New WebSocket connection established");
 
-// #[derive(Debug, Serialize)]
-// struct Responsibility {
-//     marketing: bool,
-// }
+    while let Some(Ok(msg)) = socket.recv().await {
+        if let Message::Text(text) = msg {
+            println!("Received: {}", text);
 
-// #[derive(Debug, Deserialize)]
-// struct Record {
-//     id: RecordId,
-// }
+            // Echo back the same message (replace with Kalosm or SurrealDB logic)
+            if let Err(e) = socket.send(Message::Text(format!("Echo: {}", text))).await {
+                eprintln!("Error sending message: {}", e);
+                break;
+            }
+        }
+    }
 
-// #[tokio::main]
-// async fn main() -> surrealdb::Result<()> {
-//     // Initialize the SurrealDB client
-//     let db = Surreal::new::<Ws>("127.0.0.1:8678").await?;
-
-//     db.signin(Root {
-//         username: "root",
-//         password: "root",
-//     })
-//     .await?;
-
-//     db.use_ns("test").use_db("test").await?;
-
-//     // Create a new person with a random id
-//     let created: Option<Record> = db
-//         .create("person")
-//         .content(Person {
-//             title: "Founder & CEO",
-//             name: Name {
-//                 first: "Tobie",
-//                 last: "Morgan Hitchcock",
-//             },
-//             marketing: true,
-//         })
-//         .await?;
-//     dbg!(created);
-
-//     // Update a person record with a specific id
-//     // We don't care about the response in this case
-//     // so we are just going to use `Resource::from`
-//     // to let the compiler return `surrealdb::Value`
-//     db.update(Resource::from(("person", "jaime")))
-//         .merge(Responsibility { marketing: true })
-//         .await?;
-
-//     // Select all people records
-//     let people: Vec<Record> = db.select("person").await?;
-//     dbg!(people);
-
-//     // Perform a custom advanced query
-//     let mut groups = db
-//         .query("SELECT marketing, count() FROM type::table($table) GROUP BY marketing")
-//         .bind(("table", "person"))
-//         .await?;
-//     // Use .take() to transform the first query result into
-//     // anything that can be deserialized, in this case
-//     // a Value
-//     dbg!(groups.take::<Value>(0).unwrap());
-
-//     Ok(())
-// }
+    println!("WebSocket connection closed");
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -254,17 +209,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let listener = TcpListener::bind("localhost:8080").await?;
-    let router = Router::new()
-        .route("/", get(routes::paths))
-        .route("/person/:id", post(routes::create_person))
-        .route("/person/:id", get(routes::read_person))
-        .route("/person/:id", put(routes::update_person))
-        .route("/person/:id", delete(routes::delete_person))
-        .route("/people", get(routes::list_people))
-        .route("/session", get(routes::session))
-        .route("/new_user", get(routes::make_new_user))
-        .route("/new_token", get(routes::get_new_token));
-    axum::serve(listener, router).await?;
+    // let listener = TcpListener::bind("localhost:8080").await?;
+    // let router = Router::new()
+    //     .route("/", get(routes::paths))
+    //     .route("/person/:id", post(routes::create_person))
+    //     .route("/person/:id", get(routes::read_person))
+    //     .route("/person/:id", put(routes::update_person))
+    //     .route("/person/:id", delete(routes::delete_person))
+    //     .route("/people", get(routes::list_people))
+    //     .route("/session", get(routes::session))
+    //     .route("/new_user", get(routes::make_new_user))
+    //     .route("/new_token", get(routes::get_new_token));
+    // axum::serve(listener, router).await?;
+
+    //ws thingy
+    let app = Router::<()>::new().route("/ws", get(websocket_handler));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3456));
+    println!("Listening on {}", addr);
+
+    axum_server::bind(addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+
     Ok(())
 }
