@@ -1,5 +1,5 @@
-use std::env;
 use serde::{Deserialize, Serialize};
+use std::env;
 
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
@@ -7,12 +7,37 @@ use surrealdb::RecordId;
 use surrealdb::Surreal;
 use surrealdb::Value;
 
+use axum::{
+    routing::{delete, get, post, put},
+    Router,
+};
+use std::net::SocketAddr;
 use std::sync::LazyLock;
-use axum::{Router, routing::{delete, get, post, put}};
-use surrealdb::{engine::remote::ws::{Client, Ws}};
+use surrealdb::engine::remote::ws::{Client, Ws};
 use tokio::net::TcpListener;
 
+use kalosm::{language::*, *};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+// use tokio_stream::StreamExt as TokioStreamExt;
+
+// use hyper::server;
+
+use axum::extract::State;
+use axum::{
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    response::IntoResponse,
+};
+
+use tokio::sync::mpsc;
+
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+#[derive(Clone)]
+struct AppState {
+    llm: Arc<Mutex<Llama>>,
+}
 
 mod error {
     use axum::http::StatusCode;
@@ -47,8 +72,8 @@ mod routes {
 
     use axum::{extract::Path, Json};
     use faker_rand::en_us::names::FirstName;
-    use surrealdb::{RecordId, opt::auth::Record};
     use serde::{Deserialize, Serialize};
+    use surrealdb::{opt::auth::Record, RecordId};
 
     const PERSON: &str = "person";
 
@@ -149,80 +174,79 @@ mod routes {
     }
 }
 
-// #[derive(Debug, Serialize)]
-// struct Name<'a> {
-//     first: &'a str,
-//     last: &'a str,
+// async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+//     ws.on_upgrade(handle_socket)
 // }
 
-// #[derive(Debug, Serialize)]
-// struct Person<'a> {
-//     title: &'a str,
-//     name: Name<'a>,
-//     marketing: bool,
+async fn websocket_handler(
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket))
+}
+
+// async fn handle_socket(mut socket: WebSocket) {
+//     println!("New WebSocket connection established");
+
+//     while let Some(Ok(msg)) = socket.recv().await {
+//         if let Message::Text(text) = msg {
+//             println!("Received: {}", text);
+
+//             // Echo back the same message (replace with Kalosm or SurrealDB logic)
+//             if let Err(e) = socket.send(Message::Text(format!("Echo: {}", text))).await {
+//                 eprintln!("Error sending message: {}", e);
+//                 break;
+//             }
+//         }
+//     }
+
+//     println!("WebSocket connection closed");
 // }
 
-// #[derive(Debug, Serialize)]
-// struct Responsibility {
-//     marketing: bool,
-// }
+async fn handle_socket(mut socket: WebSocket) {
+    println!("New WebSocket connection established");
 
-// #[derive(Debug, Deserialize)]
-// struct Record {
-//     id: RecordId,
-// }
+    // Create a Llama instance (will re-load model on each connection)
+    let mut llm = match Llama::new().await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error initializing Llama: {e}");
+            // Optionally send an error message and close
+            let _ = socket
+                .send(Message::Text("Error initializing Llama".to_string()))
+                .await;
+            return;
+        }
+    };
 
-// #[tokio::main]
-// async fn main() -> surrealdb::Result<()> {
-//     // Initialize the SurrealDB client
-//     let db = Surreal::new::<Ws>("127.0.0.1:8678").await?;
+    // Read messages in a loop
+    while let Some(Ok(msg)) = socket.recv().await {
+        if let Message::Text(text) = msg {
+            println!("Received from client: {}", text);
 
-//     db.signin(Root {
-//         username: "root",
-//         password: "root",
-//     })
-//     .await?;
+            // Example: Prepend/append some system prompt if desired
+            let prompt = format!("User said {text}\nPlease respond in less than 10 words:");
 
-//     db.use_ns("test").use_db("test").await?;
+            // -- Option B: Token streaming (if you prefer partial updates) --
 
-//     // Create a new person with a random id
-//     let created: Option<Record> = db
-//         .create("person")
-//         .content(Person {
-//             title: "Founder & CEO",
-//             name: Name {
-//                 first: "Tobie",
-//                 last: "Morgan Hitchcock",
-//             },
-//             marketing: true,
-//         })
-//         .await?;
-//     dbg!(created);
+            // Stream tokens to the client
+            if let Ok(mut stream) = llm.stream_text(&prompt).with_max_length(1000).await {
+                while let Some(next_token_result) = stream.next().await {
+                    if let Err(e) = socket.send(Message::Text(next_token_result)).await {
+                        eprintln!("Error sending token: {e}");
+                        break;
+                    }
+                }
+            } else {
+                let _ = socket
+                    .send(Message::Text("Error generating text".to_string()))
+                    .await;
+            }
+        }
+    }
 
-//     // Update a person record with a specific id
-//     // We don't care about the response in this case
-//     // so we are just going to use `Resource::from`
-//     // to let the compiler return `surrealdb::Value`
-//     db.update(Resource::from(("person", "jaime")))
-//         .merge(Responsibility { marketing: true })
-//         .await?;
-
-//     // Select all people records
-//     let people: Vec<Record> = db.select("person").await?;
-//     dbg!(people);
-
-//     // Perform a custom advanced query
-//     let mut groups = db
-//         .query("SELECT marketing, count() FROM type::table($table) GROUP BY marketing")
-//         .bind(("table", "person"))
-//         .await?;
-//     // Use .take() to transform the first query result into
-//     // anything that can be deserialized, in this case
-//     // a Value
-//     dbg!(groups.take::<Value>(0).unwrap());
-
-//     Ok(())
-// }
+    println!("WebSocket connection closed");
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -254,17 +278,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let listener = TcpListener::bind("localhost:8080").await?;
-    let router = Router::new()
-        .route("/", get(routes::paths))
-        .route("/person/:id", post(routes::create_person))
-        .route("/person/:id", get(routes::read_person))
-        .route("/person/:id", put(routes::update_person))
-        .route("/person/:id", delete(routes::delete_person))
-        .route("/people", get(routes::list_people))
-        .route("/session", get(routes::session))
-        .route("/new_user", get(routes::make_new_user))
-        .route("/new_token", get(routes::get_new_token));
-    axum::serve(listener, router).await?;
+    // let listener = TcpListener::bind("localhost:8080").await?;
+    // let router = Router::new()
+    //     .route("/", get(routes::paths))
+    //     .route("/person/:id", post(routes::create_person))
+    //     .route("/person/:id", get(routes::read_person))
+    //     .route("/person/:id", put(routes::update_person))
+    //     .route("/person/:id", delete(routes::delete_person))
+    //     .route("/people", get(routes::list_people))
+    //     .route("/session", get(routes::session))
+    //     .route("/new_user", get(routes::make_new_user))
+    //     .route("/new_token", get(routes::get_new_token));
+    // axum::serve(listener, router).await?;
+
+    //next-gen-ai thingy
+    let llama = Llama::new().await?;
+    let state = AppState {
+        llm: Arc::new(Mutex::new(llama)),
+    };
+
+    //ws thingy
+    let app = Router::new()
+        .route("/ws", get(websocket_handler))
+        .with_state(state);
+
+    // let app = Router::<()>::new()
+    //     .route("/ws", get(websocket_handler))
+    //     .with_state(state);
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3456));
+    println!("Listening on {}", addr);
+
+    axum_server::bind(addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+
     Ok(())
 }
