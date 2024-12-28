@@ -225,7 +225,7 @@ async fn handle_socket(mut socket: WebSocket) {
             println!("Received from client: {}", text);
 
             // Example: Prepend/append some system prompt if desired
-            let prompt = format!("User said: {text}\nPlease respond thoughtfully:");
+            let prompt = format!("User said {text}\nPlease respond in less than 10 words:");
 
             // -- Option B: Token streaming (if you prefer partial updates) --
 
