@@ -13,6 +13,11 @@ serde_json = "1.0.134"
 surrealdb = "2.1.4"
 thiserror = "2.0.9"
 tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+kalosm = { git = "https://github.com/floneum/floneum", version = "0.3.2", features = [
+    "full",
+] }
+tokio-stream = "0.1.17"
+
 
 [profile.release]
 lto = true

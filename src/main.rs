@@ -1,5 +1,5 @@
-use std::env;
 use serde::{Deserialize, Serialize};
+use std::env;
 
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
@@ -7,20 +7,37 @@ use surrealdb::RecordId;
 use surrealdb::Surreal;
 use surrealdb::Value;
 
-use std::sync::LazyLock;
-use axum::{Router, routing::{delete, get, post, put}};
-use surrealdb::{engine::remote::ws::{Client, Ws}};
-use tokio::net::TcpListener;
+use axum::{
+    routing::{delete, get, post, put},
+    Router,
+};
 use std::net::SocketAddr;
+use std::sync::LazyLock;
+use surrealdb::engine::remote::ws::{Client, Ws};
+use tokio::net::TcpListener;
+
+use kalosm::{language::*, *};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+// use tokio_stream::StreamExt as TokioStreamExt;
+
 // use hyper::server;
 
+use axum::extract::State;
 use axum::{
-    extract::ws::{WebSocket, Message, WebSocketUpgrade},
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
 };
+
 use tokio::sync::mpsc;
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+#[derive(Clone)]
+struct AppState {
+    llm: Arc<Mutex<Llama>>,
+}
 
 mod error {
     use axum::http::StatusCode;
@@ -55,8 +72,8 @@ mod routes {
 
     use axum::{extract::Path, Json};
     use faker_rand::en_us::names::FirstName;
-    use surrealdb::{RecordId, opt::auth::Record};
     use serde::{Deserialize, Serialize};
+    use surrealdb::{opt::auth::Record, RecordId};
 
     const PERSON: &str = "person";
 
@@ -157,21 +174,73 @@ mod routes {
     }
 }
 
-async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
+// async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+//     ws.on_upgrade(handle_socket)
+// }
+
+async fn websocket_handler(
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket))
 }
+
+// async fn handle_socket(mut socket: WebSocket) {
+//     println!("New WebSocket connection established");
+
+//     while let Some(Ok(msg)) = socket.recv().await {
+//         if let Message::Text(text) = msg {
+//             println!("Received: {}", text);
+
+//             // Echo back the same message (replace with Kalosm or SurrealDB logic)
+//             if let Err(e) = socket.send(Message::Text(format!("Echo: {}", text))).await {
+//                 eprintln!("Error sending message: {}", e);
+//                 break;
+//             }
+//         }
+//     }
+
+//     println!("WebSocket connection closed");
+// }
 
 async fn handle_socket(mut socket: WebSocket) {
     println!("New WebSocket connection established");
 
+    // Create a Llama instance (will re-load model on each connection)
+    let mut llm = match Llama::new().await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error initializing Llama: {e}");
+            // Optionally send an error message and close
+            let _ = socket
+                .send(Message::Text("Error initializing Llama".to_string()))
+                .await;
+            return;
+        }
+    };
+
+    // Read messages in a loop
     while let Some(Ok(msg)) = socket.recv().await {
         if let Message::Text(text) = msg {
-            println!("Received: {}", text);
+            println!("Received from client: {}", text);
 
-            // Echo back the same message (replace with Kalosm or SurrealDB logic)
-            if let Err(e) = socket.send(Message::Text(format!("Echo: {}", text))).await {
-                eprintln!("Error sending message: {}", e);
-                break;
+            // Example: Prepend/append some system prompt if desired
+            let prompt = format!("User said: {text}\nPlease respond thoughtfully:");
+
+            // -- Option B: Token streaming (if you prefer partial updates) --
+
+            // Stream tokens to the client
+            if let Ok(mut stream) = llm.stream_text(&prompt).with_max_length(1000).await {
+                while let Some(next_token_result) = stream.next().await {
+                    if let Err(e) = socket.send(Message::Text(next_token_result)).await {
+                        eprintln!("Error sending token: {e}");
+                        break;
+                    }
+                }
+            } else {
+                let _ = socket
+                    .send(Message::Text("Error generating text".to_string()))
+                    .await;
             }
         }
     }
@@ -222,8 +291,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     .route("/new_token", get(routes::get_new_token));
     // axum::serve(listener, router).await?;
 
+    //next-gen-ai thingy
+    let llama = Llama::new().await?;
+    let state = AppState {
+        llm: Arc::new(Mutex::new(llama)),
+    };
+
     //ws thingy
-    let app = Router::<()>::new().route("/ws", get(websocket_handler));
+    let app = Router::new()
+        .route("/ws", get(websocket_handler))
+        .with_state(state);
+
+    // let app = Router::<()>::new()
+    //     .route("/ws", get(websocket_handler))
+    //     .with_state(state);
+
     let addr = SocketAddr::from(([127, 0, 0, 1], 3456));
     println!("Listening on {}", addr);
 

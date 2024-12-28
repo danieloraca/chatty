@@ -45,7 +45,7 @@
 
       document.getElementById("send-btn").addEventListener("click", () => {
         if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send("Hello from client");
+          socket.send("How are you?");
         } else {
           document.getElementById("messages").innerHTML +=
             "<p>WebSocket is not open</p>";
