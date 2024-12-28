@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WebSocket Test</title>
+  </head>
+  <body>
+    <h1>WebSocket Test</h1>
+    <button id="connect-btn">Connect</button>
+    <button id="send-btn">Send Message</button>
+    <div id="messages"></div>
+
+    <script>
+      let socket = null;
+
+      document.getElementById("connect-btn").addEventListener("click", () => {
+        socket = new WebSocket("ws://127.0.0.1:3456/ws");
+
+        socket.onopen = () => {
+          console.log("WebSocket is open now");
+          document.getElementById("messages").innerHTML +=
+            "<p>WebSocket is open now</p>";
+        };
+
+        socket.onmessage = (event) => {
+          console.log("Received:", event.data);
+          document.getElementById(
+            "messages",
+          ).innerHTML += `<p>Server: ${event.data}</p>`;
+        };
+
+        socket.onclose = () => {
+          console.log("WebSocket is closed now");
+          document.getElementById("messages").innerHTML +=
+            "<p>WebSocket is closed now</p>";
+        };
+
+        socket.onerror = (error) => {
+          console.error("WebSocket error:", error);
+          document.getElementById(
+            "messages",
+          ).innerHTML += `<p>Error: ${error.message}</p>`;
+        };
+      });
+
+      document.getElementById("send-btn").addEventListener("click", () => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send("Hello from client");
+        } else {
+          document.getElementById("messages").innerHTML +=
+            "<p>WebSocket is not open</p>";
+        }
+      });
+    </script>
+  </body>
+</html>
