@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::env;
 
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
@@ -20,23 +19,33 @@ use kalosm::{language::*, *};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// use tokio_stream::StreamExt as TokioStreamExt;
-
-// use hyper::server;
-
 use axum::extract::State;
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
 };
 
-use tokio::sync::mpsc;
-
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 #[derive(Clone)]
 struct AppState {
     llm: Arc<Mutex<Llama>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MessageRecord {
+    content: String,
+    sender: String,
+    timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    // You can expand these fields or rename them
+    pub role: String,    // e.g. "user" or "assistant"
+    pub content: String, // the message text
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub id: Option<RecordId>, // SurrealDB auto-generated ID
 }
 
 mod error {
@@ -174,10 +183,6 @@ mod routes {
     }
 }
 
-// async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-//     ws.on_upgrade(handle_socket)
-// }
-
 async fn websocket_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
@@ -185,25 +190,31 @@ async fn websocket_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-// async fn handle_socket(mut socket: WebSocket) {
-//     println!("New WebSocket connection established");
+async fn save_message(role: String, content: String) {
+    let user_msg = ChatMessage {
+        role,
+        content,
+        timestamp: chrono::Utc::now(),
+        id: None,
+    };
 
-//     while let Some(Ok(msg)) = socket.recv().await {
-//         if let Message::Text(text) = msg {
-//             println!("Received: {}", text);
+    let create_user_message: Result<std::option::Option<ChatMessage>, surrealdb::Error> =
+        DB.create("messages").content(user_msg).await;
 
-//             // Echo back the same message (replace with Kalosm or SurrealDB logic)
-//             if let Err(e) = socket.send(Message::Text(format!("Echo: {}", text))).await {
-//                 eprintln!("Error sending message: {}", e);
-//                 break;
-//             }
-//         }
-//     }
+    match create_user_message {
+        Ok(Some(record)) => {
+            println!("Inserted record with ID {:?}", record.id);
+        }
+        Ok(None) => {
+            println!("No record returned (check your Surreal schema).");
+        }
+        Err(e) => {
+            eprintln!("Error saving user message: {}", e);
+        }
+    }
+}
 
-//     println!("WebSocket connection closed");
-// }
-
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
+async fn handle_socket(mut socket: WebSocket, _state: AppState) {
     // TODO: use state
     println!("New WebSocket connection established");
 
@@ -224,22 +235,30 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     while let Some(Ok(msg)) = socket.recv().await {
         if let Message::Text(text) = msg {
             println!("Received from client: {}", text);
+            // Save the received message to the database
+            save_message("user".to_string(), text.clone()).await;
 
-            let prompt = text;
+            let prompt = format!("User input: {}. Respond in few words", text);
 
             // Stream tokens to the client
+            let mut ai_response = String::new();
+
             if let Ok(mut stream) = llm.stream_text(&prompt).with_max_length(1000).await {
                 while let Some(next_token_result) = stream.next().await {
-                    if let Err(e) = socket.send(Message::Text(next_token_result)).await {
+                    if let Err(e) = socket.send(Message::Text(next_token_result.clone())).await {
                         eprintln!("Error sending token: {e}");
                         break;
                     }
+
+                    ai_response.push_str(&next_token_result);
                 }
             } else {
                 let _ = socket
                     .send(Message::Text("Error generating text".to_string()))
                     .await;
             }
+
+            save_message("assistant".to_string(), ai_response).await;
         }
     }
 
@@ -273,6 +292,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
 	DURATION FOR TOKEN 15m, FOR SESSION 12h
 ;",
+    )
+    .await?;
+
+    //setup messages table
+    DB.query(
+        "DEFINE TABLE IF NOT EXISTS messages SCHEMALESS
+            PERMISSIONS FOR
+                CREATE, SELECT WHERE $auth,
+                FOR UPDATE, DELETE WHERE created_by = $auth;
+        DEFINE FIELD IF NOT EXISTS content ON TABLE message TYPE string;
+        DEFINE FIELD IF NOT EXISTS sender ON TABLE message TYPE string;
+        DEFINE FIELD IF NOT EXISTS timestamp ON TABLE message TYPE datetime;
+        DEFINE FIELD IF NOT EXISTS created_by ON TABLE message VALUE $auth READONLY;
+        ",
     )
     .await?;
 
