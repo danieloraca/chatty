@@ -182,7 +182,7 @@ async fn websocket_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket))
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 // async fn handle_socket(mut socket: WebSocket) {
@@ -203,11 +203,12 @@ async fn websocket_handler(
 //     println!("WebSocket connection closed");
 // }
 
-async fn handle_socket(mut socket: WebSocket) {
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    // TODO: use state
     println!("New WebSocket connection established");
 
     // Create a Llama instance (will re-load model on each connection)
-    let mut llm = match Llama::new().await {
+    let llm = match Llama::new().await {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Error initializing Llama: {e}");
@@ -224,10 +225,7 @@ async fn handle_socket(mut socket: WebSocket) {
         if let Message::Text(text) = msg {
             println!("Received from client: {}", text);
 
-            // Example: Prepend/append some system prompt if desired
-            let prompt = format!("User said {text}\nPlease respond in less than 10 words:");
-
-            // -- Option B: Token streaming (if you prefer partial updates) --
+            let prompt = text;
 
             // Stream tokens to the client
             if let Ok(mut stream) = llm.stream_text(&prompt).with_max_length(1000).await {
