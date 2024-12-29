@@ -17,7 +17,7 @@ kalosm = { git = "https://github.com/floneum/floneum", version = "0.3.2", featur
     "full",
 ] }
 tokio-stream = "0.1.17"
-
+chrono = "0.4.39"
 
 [profile.release]
 lto = true
