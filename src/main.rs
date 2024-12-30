@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use futures::StreamExt;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
 use surrealdb::RecordId;
@@ -26,6 +27,12 @@ use axum::{
 };
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+#[derive(Parse, Clone)]
+pub enum Response {
+    Do(String),
+    Say(String),
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -218,12 +225,14 @@ async fn handle_socket(mut socket: WebSocket, _state: AppState) {
     // TODO: use state
     println!("New WebSocket connection established");
 
-    // Create a Llama instance (will re-load model on each connection)
-    let llm = match Llama::new().await {
+    // Create the parser
+    let parser = Arc::new(Response::new_parser());
+
+    // Initialize the Llama model and chat session
+    let model = match Llama::new_chat().await {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Error initializing Llama: {e}");
-            // Optionally send an error message and close
             let _ = socket
                 .send(Message::Text("Error initializing Llama".to_string()))
                 .await;
@@ -231,34 +240,41 @@ async fn handle_socket(mut socket: WebSocket, _state: AppState) {
         }
     };
 
-    // Read messages in a loop
+    let mut chat = Chat::builder(model)
+        .with_constraints(move |_history| parser.clone())
+        .with_system_prompt(
+            "Respond with JSON in the format { \"type\": \"Say\", \"data\": \"hello\" }",
+        )
+        .build();
+
+    // WebSocket message loop
     while let Some(Ok(msg)) = socket.recv().await {
         if let Message::Text(text) = msg {
             println!("Received from client: {}", text);
             // Save the received message to the database
             save_message("user".to_string(), text.clone()).await;
 
-            let prompt = format!("User input: {}. Respond in few words", text);
+            // Add the user message to the chat and process the stream
+            let mut response_stream = chat.add_message(text);
+            let mut full_response = String::new();
 
-            // Stream tokens to the client
-            let mut ai_response = String::new();
+            while let Some(text_chunk) = response_stream.next().await {
+                // Append each chunk to the full response
+                full_response.push_str(&text_chunk);
 
-            if let Ok(mut stream) = llm.stream_text(&prompt).with_max_length(1000).await {
-                while let Some(next_token_result) = stream.next().await {
-                    if let Err(e) = socket.send(Message::Text(next_token_result.clone())).await {
-                        eprintln!("Error sending token: {e}");
-                        break;
-                    }
-
-                    ai_response.push_str(&next_token_result);
+                // Optionally send partial updates to the client
+                if let Err(e) = socket.send(Message::Text(text_chunk.clone())).await {
+                    eprintln!("Error sending chunk: {e}");
+                    break;
                 }
-            } else {
-                let _ = socket
-                    .send(Message::Text("Error generating text".to_string()))
-                    .await;
             }
 
-            save_message("assistant".to_string(), ai_response).await;
+            // // Optionally send the full response again at the end
+            // if let Err(e) = socket.send(Message::Text(full_response)).await {
+            //     eprintln!("Error sending full response: {e}");
+            // }
+
+            save_message("assistant".to_string(), full_response).await;
         }
     }
 
@@ -323,7 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // axum::serve(listener, router).await?;
 
     //next-gen-ai thingy
-    let llama = Llama::new().await?;
+    let llama = Llama::new_chat().await?;
     let state = AppState {
         llm: Arc::new(Mutex::new(llama)),
     };
