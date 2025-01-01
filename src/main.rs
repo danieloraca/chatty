@@ -221,7 +221,7 @@ async fn save_message(role: String, content: String) {
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, _state: AppState) {
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
     // TODO: use state
     println!("New WebSocket connection established");
 
@@ -229,15 +229,22 @@ async fn handle_socket(mut socket: WebSocket, _state: AppState) {
     let parser = Arc::new(Response::new_parser());
 
     // Initialize the Llama model and chat session
-    let model = match Llama::new_chat().await {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Error initializing Llama: {e}");
-            let _ = socket
-                .send(Message::Text("Error initializing Llama".to_string()))
-                .await;
-            return;
-        }
+    // let model = match Llama::new_chat().await {
+    //     Ok(m) => m,
+    //     Err(e) => {
+    //         eprintln!("Error initializing Llama: {e}");
+    //         let _ = socket
+    //             .send(Message::Text("Error initializing Llama".to_string()))
+    //             .await;
+    //         return;
+    //     }
+    // };
+
+    let model = {
+        // Lock the mutex
+        let llama_guard = state.llm.lock().await;
+        // Clone it if needed, or directly pass &*llama_guard to the Chat builder
+        llama_guard.clone()
     };
 
     let mut chat = Chat::builder(model)
