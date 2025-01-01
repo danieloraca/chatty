@@ -6,7 +6,7 @@ use surrealdb::RecordId;
 use surrealdb::Surreal;
 
 use axum::{
-    routing::{get},
+    routing::get,
     Router,
 };
 use std::net::SocketAddr;
