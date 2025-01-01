@@ -1,14 +1,59 @@
+use serde::{Deserialize, Serialize};
+
+use futures::StreamExt;
+use surrealdb::opt::auth::Root;
+use surrealdb::opt::Resource;
+use surrealdb::RecordId;
+use surrealdb::Surreal;
+use surrealdb::Value;
+
 use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use std::net::SocketAddr;
 use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::{Client, Ws};
-use surrealdb::opt::auth::Root;
-use surrealdb::Surreal;
 use tokio::net::TcpListener;
 
+use kalosm::{language::*, *};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use axum::extract::State;
+use axum::{
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    response::IntoResponse,
+};
+
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+#[derive(Parse, Clone)]
+pub enum Response {
+    Do(String),
+    Say(String),
+}
+
+#[derive(Clone)]
+struct AppState {
+    llm: Arc<Mutex<Llama>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MessageRecord {
+    content: String,
+    sender: String,
+    timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    // You can expand these fields or rename them
+    pub role: String,    // e.g. "user" or "assistant"
+    pub content: String, // the message text
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub id: Option<RecordId>, // SurrealDB auto-generated ID
+}
 
 mod error {
     use axum::http::StatusCode;
@@ -172,6 +217,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
 	DURATION FOR TOKEN 15m, FOR SESSION 12h
 ;",
+    )
+    .await?;
+
+    //setup messages table
+    DB.query(
+        "DEFINE TABLE IF NOT EXISTS messages SCHEMALESS
+            PERMISSIONS FOR
+                CREATE, SELECT WHERE $auth,
+                FOR UPDATE, DELETE WHERE created_by = $auth;
+        DEFINE FIELD IF NOT EXISTS content ON TABLE message TYPE string;
+        DEFINE FIELD IF NOT EXISTS sender ON TABLE message TYPE string;
+        DEFINE FIELD IF NOT EXISTS timestamp ON TABLE message TYPE datetime;
+        DEFINE FIELD IF NOT EXISTS created_by ON TABLE message VALUE $auth READONLY;
+        ",
     )
     .await?;
 

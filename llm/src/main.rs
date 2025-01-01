@@ -2,19 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use futures::StreamExt;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::Resource;
 use surrealdb::RecordId;
 use surrealdb::Surreal;
-use surrealdb::Value;
 
 use axum::{
-    routing::{delete, get, post, put},
+    routing::{get},
     Router,
 };
 use std::net::SocketAddr;
 use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::{Client, Ws};
-use tokio::net::TcpListener;
 
 use kalosm::{language::*, *};
 use std::sync::Arc;
@@ -128,11 +125,6 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     break;
                 }
             }
-
-            // // Optionally send the full response again at the end
-            // if let Err(e) = socket.send(Message::Text(full_response)).await {
-            //     eprintln!("Error sending full response: {e}");
-            // }
 
             save_message("assistant".to_string(), full_response).await;
         }
