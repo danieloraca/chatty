@@ -1,17 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use futures::StreamExt;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::Resource;
 use surrealdb::RecordId;
 use surrealdb::Surreal;
-use surrealdb::Value;
 
 use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use std::net::SocketAddr;
+
 use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::{Client, Ws};
 use tokio::net::TcpListener;
@@ -19,12 +16,6 @@ use tokio::net::TcpListener;
 use kalosm::{language::*, *};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-use axum::extract::State;
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-};
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
