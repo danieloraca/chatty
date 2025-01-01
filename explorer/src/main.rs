@@ -13,22 +13,7 @@ use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::{Client, Ws};
 use tokio::net::TcpListener;
 
-use kalosm::{language::*, *};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
-
-#[derive(Parse, Clone)]
-pub enum Response {
-    Do(String),
-    Say(String),
-}
-
-#[derive(Clone)]
-struct AppState {
-    llm: Arc<Mutex<Llama>>,
-}
 
 #[derive(Serialize, Deserialize)]
 struct MessageRecord {
