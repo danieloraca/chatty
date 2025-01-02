@@ -98,10 +98,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     };
 
     let mut chat = Chat::builder(model)
-        .with_constraints(move |_history| parser.clone())
+        // .with_constraints(move |_history| parser.clone())
         // .with_system_prompt(
-        //     "Respond with JSON in the format { \"type\": \"Say\", \"data\": \"hello\" }",
+        //     "Respond with JSON in the format { \"type\": \"LLM Response\", \"data\": \"hello\" }",
         // )
+        .with_system_prompt(
+            "Respond briefly with a sentence or two.",
+        )
         .build();
 
     // WebSocket message loop
