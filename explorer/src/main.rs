@@ -1,43 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-use futures::StreamExt;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::Resource;
 use surrealdb::RecordId;
 use surrealdb::Surreal;
-use surrealdb::Value;
 
 use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use std::net::SocketAddr;
+
 use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::{Client, Ws};
 use tokio::net::TcpListener;
 
-use kalosm::{language::*, *};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-use axum::extract::State;
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-};
-
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
-
-#[derive(Parse, Clone)]
-pub enum Response {
-    Do(String),
-    Say(String),
-}
-
-#[derive(Clone)]
-struct AppState {
-    llm: Arc<Mutex<Llama>>,
-}
 
 #[derive(Serialize, Deserialize)]
 struct MessageRecord {
@@ -190,104 +166,6 @@ mod routes {
     }
 }
 
-async fn websocket_handler(
-    State(state): State<AppState>,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
-}
-
-async fn save_message(role: String, content: String) {
-    let user_msg = ChatMessage {
-        role,
-        content,
-        timestamp: chrono::Utc::now(),
-        id: None,
-    };
-
-    let create_user_message: Result<std::option::Option<ChatMessage>, surrealdb::Error> =
-        DB.create("messages").content(user_msg).await;
-
-    match create_user_message {
-        Ok(Some(record)) => {
-            println!("Inserted record with ID {:?}", record.id);
-        }
-        Ok(None) => {
-            println!("No record returned (check your Surreal schema).");
-        }
-        Err(e) => {
-            eprintln!("Error saving user message: {}", e);
-        }
-    }
-}
-
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    // TODO: use state
-    println!("New WebSocket connection established");
-
-    // Create the parser
-    let parser = Arc::new(Response::new_parser());
-
-    // Initialize the Llama model and chat session
-    // let model = match Llama::new_chat().await {
-    //     Ok(m) => m,
-    //     Err(e) => {
-    //         eprintln!("Error initializing Llama: {e}");
-    //         let _ = socket
-    //             .send(Message::Text("Error initializing Llama".to_string()))
-    //             .await;
-    //         return;
-    //     }
-    // };
-
-    let model = {
-        // Lock the mutex
-        let llama_guard = state.llm.lock().await;
-        // Clone it if needed, or directly pass &*llama_guard to the Chat builder
-        llama_guard.clone()
-    };
-
-    let mut chat = Chat::builder(model)
-        .with_constraints(move |_history| parser.clone())
-        .with_system_prompt(
-            "Respond with JSON in the format { \"type\": \"Say\", \"data\": \"hello\" }",
-        )
-        .build();
-
-    // WebSocket message loop
-    while let Some(Ok(msg)) = socket.recv().await {
-        if let Message::Text(text) = msg {
-            println!("Received from client: {}", text);
-            // Save the received message to the database
-            save_message("user".to_string(), text.clone()).await;
-
-            // Add the user message to the chat and process the stream
-            let mut response_stream = chat.add_message(text);
-            let mut full_response = String::new();
-
-            while let Some(text_chunk) = response_stream.next().await {
-                // Append each chunk to the full response
-                full_response.push_str(&text_chunk);
-
-                // Optionally send partial updates to the client
-                if let Err(e) = socket.send(Message::Text(text_chunk.clone())).await {
-                    eprintln!("Error sending chunk: {e}");
-                    break;
-                }
-            }
-
-            // // Optionally send the full response again at the end
-            // if let Err(e) = socket.send(Message::Text(full_response)).await {
-            //     eprintln!("Error sending full response: {e}");
-            // }
-
-            save_message("assistant".to_string(), full_response).await;
-        }
-    }
-
-    println!("WebSocket connection closed");
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     DB.connect::<Ws>("localhost:8678").await?;
@@ -332,41 +210,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // let listener = TcpListener::bind("localhost:8080").await?;
-    // let router = Router::new()
-    //     .route("/", get(routes::paths))
-    //     .route("/person/:id", post(routes::create_person))
-    //     .route("/person/:id", get(routes::read_person))
-    //     .route("/person/:id", put(routes::update_person))
-    //     .route("/person/:id", delete(routes::delete_person))
-    //     .route("/people", get(routes::list_people))
-    //     .route("/session", get(routes::session))
-    //     .route("/new_user", get(routes::make_new_user))
-    //     .route("/new_token", get(routes::get_new_token));
-    // axum::serve(listener, router).await?;
-
-    //next-gen-ai thingy
-    let llama = Llama::new_chat().await?;
-    let state = AppState {
-        llm: Arc::new(Mutex::new(llama)),
-    };
-
-    //ws thingy
-    let app = Router::new()
-        .route("/ws", get(websocket_handler))
-        .with_state(state);
-
-    // let app = Router::<()>::new()
-    //     .route("/ws", get(websocket_handler))
-    //     .with_state(state);
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3456));
-    println!("Listening on {}", addr);
-
-    axum_server::bind(addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = TcpListener::bind("localhost:8080").await?;
+    let router = Router::new()
+        .route("/", get(routes::paths))
+        .route("/person/:id", post(routes::create_person))
+        .route("/person/:id", get(routes::read_person))
+        .route("/person/:id", put(routes::update_person))
+        .route("/person/:id", delete(routes::delete_person))
+        .route("/people", get(routes::list_people))
+        .route("/session", get(routes::session))
+        .route("/new_user", get(routes::make_new_user))
+        .route("/new_token", get(routes::get_new_token));
+    axum::serve(listener, router).await?;
 
     Ok(())
 }
