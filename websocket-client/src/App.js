@@ -5,6 +5,7 @@ function App() {
   const [socket, setSocket] = useState(null);
   const [inputMessage, setInputMessage] = useState("");
   const [messages, setMessages] = useState([]);
+  const [isTyping, setIsTyping] = useState(false);
 
   // Reference to the chat container for auto-scrolling
   const chatContainerRef = useRef(null);
@@ -28,6 +29,7 @@ function App() {
 
     ws.onmessage = (event) => {
       console.log("Received from server:", event.data);
+      setIsTyping(false);
 
       setMessages((prev) => {
         if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
@@ -35,6 +37,7 @@ function App() {
           let lastMessage = { ...prev[prev.length - 1] };
           // Append the new data directly without adding an extra space
           lastMessage.text += event.data;
+
           // Return a new array with the updated last message
           return [...prev.slice(0, -1), lastMessage];
         } else {
@@ -71,6 +74,7 @@ function App() {
       setMessages((prev) => [...prev, { text: inputMessage, sender: "me" }]);
       // Clear the input field
       setInputMessage("");
+      setIsTyping(true);
     } else {
       // If not connected, handle accordingly
       setMessages((prev) => [
@@ -93,7 +97,7 @@ function App() {
       chatContainerRef.current.scrollTop =
         chatContainerRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isTyping]);
 
   return (
     <div className="app-container">
@@ -113,6 +117,16 @@ function App() {
             <div className="message-bubble">{msg.text}</div>
           </div>
         ))}
+        {/* Typing Indicator */}
+        {isTyping && (
+          <div className="message-row server">
+            <div className="typing-indicator">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Footer input */}
