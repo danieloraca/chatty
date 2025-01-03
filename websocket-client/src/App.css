@@ -2,60 +2,59 @@
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh; /* Make the app take full screen height */
+  height: 100vh; /* Full viewport height */
+  font-family: Arial, sans-serif;
 }
 
-/* Header with the title and connect button */
+/* Header */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: #075e54; /* WhatsApp-ish green */
+  background-color: #075e54; /* WhatsApp green */
   color: white;
   padding: 1rem;
 }
 
-/* The main area which holds the chat messages */
+/* Chat container */
 .chat-container {
-  flex: 1; /* So it grows and occupies the available space */
+  flex: 1;
   padding: 1rem;
-  overflow-y: auto; /* Scroll if messages get longer than the container */
-  background-color: #ece5dd; /* WhatsApp background color */
+  overflow-y: auto;
+  background-color: #ece5dd; /* WhatsApp background */
 }
 
-/* Each message row: we align right if it's from 'me', left if from 'server' */
+/* Message rows */
 .message-row {
   display: flex;
   margin-bottom: 0.5rem;
-  /* We will rely on a conditional class for alignment */
 }
 
-/* Align the 'me' messages to the right */
+/* Align messages */
 .message-row.me {
   justify-content: flex-end;
 }
 
-/* Align the 'server' messages to the left */
 .message-row.server {
   justify-content: flex-start;
 }
 
-/* The actual bubble for messages */
+/* Message bubbles */
 .message-bubble {
   max-width: 60%;
   padding: 0.75rem 1rem;
   border-radius: 8px;
   line-height: 1.4;
   font-size: 0.9rem;
-  background-color: #dcf8c6; /* Light green bubble, typical for WhatsApp */
-  /* We'll override it for the server messages with a separate class if we want */
+  background-color: #dcf8c6; /* Light green for 'me' */
 }
 
+/* Different background for server messages */
 .message-row.server .message-bubble {
-  background-color: #fff; /* White bubble for server (or "other") messages */
+  background-color: #fff; /* White for 'server' */
 }
 
-/* Footer at the bottom with an input and a send button */
+/* Footer input */
 .chat-footer {
   display: flex;
   align-items: center;
@@ -80,4 +79,8 @@
   border: none;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.chat-footer button:hover {
+  background-color: #0b7a66;
 }

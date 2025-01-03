@@ -1,10 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import "./App.css";
 
 function App() {
   const [socket, setSocket] = useState(null);
   const [inputMessage, setInputMessage] = useState("");
   const [messages, setMessages] = useState([]);
+
+  // Reference to the chat container for auto-scrolling
+  const chatContainerRef = useRef(null);
 
   const connectWebSocket = () => {
     if (socket) {
@@ -26,14 +29,12 @@ function App() {
     ws.onmessage = (event) => {
       console.log("Received from server:", event.data);
 
-      // If the last message is from the server, append this new data
-      // Otherwise, create a new server message
       setMessages((prev) => {
         if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
-          // Copy the last message
+          // Clone the last message
           let lastMessage = { ...prev[prev.length - 1] };
-          // Append a space plus the new word (you may want to handle punctuation/trimming)
-          lastMessage.text = lastMessage.text + " " + event.data;
+          // Append the new data directly without adding an extra space
+          lastMessage.text += event.data;
           // Return a new array with the updated last message
           return [...prev.slice(0, -1), lastMessage];
         } else {
@@ -86,6 +87,14 @@ function App() {
     }
   };
 
+  // Auto-scroll to the bottom whenever messages change
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop =
+        chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   return (
     <div className="app-container">
       {/* Header */}
@@ -95,7 +104,7 @@ function App() {
       </div>
 
       {/* Chat container */}
-      <div className="chat-container">
+      <div className="chat-container" ref={chatContainerRef}>
         {messages.map((msg, index) => (
           <div
             key={index}
