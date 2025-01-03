@@ -1,38 +1,83 @@
-.App {
-  text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+/* The outer container to hold everything */
+.app-container {
   display: flex;
   flex-direction: column;
+  height: 100vh; /* Make the app take full screen height */
+}
+
+/* Header with the title and connect button */
+.header {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  justify-content: space-between;
+  background-color: #075e54; /* WhatsApp-ish green */
   color: white;
+  padding: 1rem;
 }
 
-.App-link {
-  color: #61dafb;
+/* The main area which holds the chat messages */
+.chat-container {
+  flex: 1; /* So it grows and occupies the available space */
+  padding: 1rem;
+  overflow-y: auto; /* Scroll if messages get longer than the container */
+  background-color: #ece5dd; /* WhatsApp background color */
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Each message row: we align right if it's from 'me', left if from 'server' */
+.message-row {
+  display: flex;
+  margin-bottom: 0.5rem;
+  /* We will rely on a conditional class for alignment */
+}
+
+/* Align the 'me' messages to the right */
+.message-row.me {
+  justify-content: flex-end;
+}
+
+/* Align the 'server' messages to the left */
+.message-row.server {
+  justify-content: flex-start;
+}
+
+/* The actual bubble for messages */
+.message-bubble {
+  max-width: 60%;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  line-height: 1.4;
+  font-size: 0.9rem;
+  background-color: #dcf8c6; /* Light green bubble, typical for WhatsApp */
+  /* We'll override it for the server messages with a separate class if we want */
+}
+
+.message-row.server .message-bubble {
+  background-color: #fff; /* White bubble for server (or "other") messages */
+}
+
+/* Footer at the bottom with an input and a send button */
+.chat-footer {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  background-color: #f0f0f0;
+}
+
+.chat-footer input {
+  flex: 1;
+  padding: 0.5rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 0.5rem;
+}
+
+.chat-footer button {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  background-color: #075e54;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }

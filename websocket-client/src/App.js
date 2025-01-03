@@ -1,13 +1,12 @@
 import React, { useState } from "react";
+import "./App.css";
 
 function App() {
   const [socket, setSocket] = useState(null);
   const [inputMessage, setInputMessage] = useState("");
-  const [receivedMessage, setReceivedMessage] = useState("");
+  const [messages, setMessages] = useState([]);
 
-  let messageText = "";
   const connectWebSocket = () => {
-    // If you already have a socket open, you can close it first or just reuse it
     if (socket) {
       socket.close();
     }
@@ -15,30 +14,49 @@ function App() {
     // Create the WebSocket
     const ws = new WebSocket("ws://127.0.0.1:3456/ws");
 
-    // Socket opened
     ws.onopen = () => {
       console.log("WebSocket is open now");
-      setReceivedMessage("Connected to the server!");
+      // Optionally, add a "connected" message
+      setMessages((prev) => [
+        ...prev,
+        { text: "Connected to the server!", sender: "server" },
+      ]);
     };
 
-    // Listen for messages
     ws.onmessage = (event) => {
       console.log("Received from server:", event.data);
-      // Just replace the content of receivedMessage with the latest message
-      messageText += event.data;
-      setReceivedMessage(messageText);
+
+      // If the last message is from the server, append this new data
+      // Otherwise, create a new server message
+      setMessages((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
+          // Copy the last message
+          let lastMessage = { ...prev[prev.length - 1] };
+          // Append a space plus the new word (you may want to handle punctuation/trimming)
+          lastMessage.text = lastMessage.text + " " + event.data;
+          // Return a new array with the updated last message
+          return [...prev.slice(0, -1), lastMessage];
+        } else {
+          // If there's no last server message, create a new one
+          return [...prev, { text: event.data, sender: "server" }];
+        }
+      });
     };
 
-    // Socket closed
     ws.onclose = () => {
       console.log("WebSocket is closed now");
-      setReceivedMessage("WebSocket connection closed");
+      setMessages((prev) => [
+        ...prev,
+        { text: "WebSocket connection closed", sender: "server" },
+      ]);
     };
 
-    // Socket error
     ws.onerror = (err) => {
       console.error("WebSocket error:", err);
-      setReceivedMessage(`Error: ${err.message}`);
+      setMessages((prev) => [
+        ...prev,
+        { text: `Error: ${err.message}`, sender: "server" },
+      ]);
     };
 
     setSocket(ws);
@@ -46,40 +64,58 @@ function App() {
 
   const sendMessage = () => {
     if (socket && socket.readyState === WebSocket.OPEN) {
+      // Send the message to the server
       socket.send(inputMessage);
-      // Clear the input field after sending
+      // Add it to our local messages
+      setMessages((prev) => [...prev, { text: inputMessage, sender: "me" }]);
+      // Clear the input field
       setInputMessage("");
     } else {
-      setReceivedMessage("WebSocket is not open");
+      // If not connected, handle accordingly
+      setMessages((prev) => [
+        ...prev,
+        { text: "WebSocket is not open", sender: "server" },
+      ]);
+    }
+  };
+
+  // Optionally send message on Enter key
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      sendMessage();
     }
   };
 
   return (
-    <div style={{ margin: "2rem" }}>
-      <h1>WebSocket Demo</h1>
-
-      {/* Connect Button */}
-      <div style={{ marginBottom: "1rem" }}>
+    <div className="app-container">
+      {/* Header */}
+      <div className="header">
+        <h1>WebSocket Demo</h1>
         <button onClick={connectWebSocket}>Connect</button>
       </div>
 
-      {/* Textbox to type a message */}
-      <div style={{ marginBottom: "1rem" }}>
+      {/* Chat container */}
+      <div className="chat-container">
+        {messages.map((msg, index) => (
+          <div
+            key={index}
+            className={`message-row ${msg.sender === "me" ? "me" : "server"}`}
+          >
+            <div className="message-bubble">{msg.text}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer input */}
+      <div className="chat-footer">
         <input
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          placeholder="Type your message"
+          onKeyDown={handleKeyDown}
+          placeholder="Type your message..."
         />
-        <button onClick={sendMessage}>Send Message</button>
-      </div>
-
-      {/* Display the latest server response */}
-      <div
-        style={{ border: "1px solid black", padding: "1rem", width: "300px" }}
-      >
-        <strong>Server Response:</strong>
-        <p>{receivedMessage}</p>
+        <button onClick={sendMessage}>Send</button>
       </div>
     </div>
   );
