@@ -103,7 +103,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         //     "Respond with JSON in the format { \"type\": \"LLM Response\", \"data\": \"hello\" }",
         // )
         .with_system_prompt(
-            "Respond briefly with a sentence or two.",
+            "Respond briefly with a snarky sentence or two.",
         )
         .build();
 
