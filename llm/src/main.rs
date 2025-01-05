@@ -1,17 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use futures::StreamExt;
-use surrealdb::opt::auth::Root;
-use surrealdb::RecordId;
-use surrealdb::Surreal;
+// use surrealdb::opt::auth::Root;
+// use surrealdb::RecordId;
+// use surrealdb::Surreal;
 
-use axum::{
-    routing::get,
-    Router,
-};
+use axum::{routing::get, Router};
 use std::net::SocketAddr;
 use std::sync::LazyLock;
-use surrealdb::engine::remote::ws::{Client, Ws};
+// use surrealdb::engine::remote::ws::{Client, Ws};
 
 use kalosm::{language::*, *};
 use std::sync::Arc;
@@ -23,7 +20,7 @@ use axum::{
     response::IntoResponse,
 };
 
-static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 #[derive(Parse, Clone)]
 pub enum Response {
@@ -43,14 +40,14 @@ struct MessageRecord {
     timestamp: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChatMessage {
-    // You can expand these fields or rename them
-    pub role: String,    // e.g. "user" or "assistant"
-    pub content: String, // the message text
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub id: Option<RecordId>, // SurrealDB auto-generated ID
-}
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct ChatMessage {
+//     // You can expand these fields or rename them
+//     pub role: String,    // e.g. "user" or "assistant"
+//     pub content: String, // the message text
+//     pub timestamp: chrono::DateTime<chrono::Utc>,
+//     pub id: Option<RecordId>, // SurrealDB auto-generated ID
+// }
 
 async fn websocket_handler(
     State(state): State<AppState>,
@@ -59,29 +56,29 @@ async fn websocket_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-async fn save_message(role: String, content: String) {
-    let user_msg = ChatMessage {
-        role,
-        content,
-        timestamp: chrono::Utc::now(),
-        id: None,
-    };
+// async fn save_message(role: String, content: String) {
+//     let user_msg = ChatMessage {
+//         role,
+//         content,
+//         timestamp: chrono::Utc::now(),
+//         id: None,
+//     };
 
-    let create_user_message: Result<std::option::Option<ChatMessage>, surrealdb::Error> =
-        DB.create("messages").content(user_msg).await;
+//     let create_user_message: Result<std::option::Option<ChatMessage>, surrealdb::Error> =
+//         DB.create("messages").content(user_msg).await;
 
-    match create_user_message {
-        Ok(Some(record)) => {
-            println!("Inserted record with ID {:?}", record.id);
-        }
-        Ok(None) => {
-            println!("No record returned (check your Surreal schema).");
-        }
-        Err(e) => {
-            eprintln!("Error saving user message: {}", e);
-        }
-    }
-}
+//     match create_user_message {
+//         Ok(Some(record)) => {
+//             println!("Inserted record with ID {:?}", record.id);
+//         }
+//         Ok(None) => {
+//             println!("No record returned (check your Surreal schema).");
+//         }
+//         Err(e) => {
+//             eprintln!("Error saving user message: {}", e);
+//         }
+//     }
+// }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     // TODO: use state
@@ -102,9 +99,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         // .with_system_prompt(
         //     "Respond with JSON in the format { \"type\": \"LLM Response\", \"data\": \"hello\" }",
         // )
-        .with_system_prompt(
-            "Respond briefly with a snarky sentence or two.",
-        )
+        .with_system_prompt("Respond briefly with a snarky sentence or two.")
         .build();
 
     // WebSocket message loop
@@ -112,7 +107,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         if let Message::Text(text) = msg {
             println!("Received from client: {}", text);
             // Save the received message to the database
-            save_message("user".to_string(), text.clone()).await;
+            // save_message("user".to_string(), text.clone()).await;
 
             // Add the user message to the chat and process the stream
             let mut response_stream = chat.add_message(text);
@@ -129,7 +124,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
             }
 
-            save_message("assistant".to_string(), full_response).await;
+            // save_message("assistant".to_string(), full_response).await;
         }
     }
 
@@ -138,18 +133,19 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    DB.connect::<Ws>("localhost:8678").await?;
+    // DB.connect::<Ws>("localhost:8678").await?;
 
-    DB.signin(Root {
-        username: "root",
-        password: "root",
-    })
-    .await?;
+    // DB.signin(Root {
+    //     username: "root",
+    //     password: "root",
+    // })
+    // .await?;
 
-    DB.use_ns("test").use_db("test").await?;
+    // DB.use_ns("test").use_db("test").await?;
 
     //next-gen-ai thingy
     let llama = Llama::new_chat().await?;
+
     let state = AppState {
         llm: Arc::new(Mutex::new(llama)),
     };
