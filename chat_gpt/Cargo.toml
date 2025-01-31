@@ -1,5 +1,5 @@
 [package]
-name = "llm"
+name = "chat_gpt"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,6 +19,9 @@ tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1.17"
 chrono = "0.4.39"
 futures = "0.3.31"
+
+dotenvy = "0.15.7"
+async-openai = "0.27.2"
 
 [profile.release]
 lto = true
