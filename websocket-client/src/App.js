@@ -1,10 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./App.css";
+import Prism from "prismjs";
+import "prismjs/themes/prism-okaidia.css";
+import "prismjs/components/prism-rust";
 
 function App() {
   const [socket, setSocket] = useState(null);
   const [inputMessage, setInputMessage] = useState("");
   const [messages, setMessages] = useState([]);
+
   const [isTyping, setIsTyping] = useState(false);
 
   // Reference to the chat container for auto-scrolling
@@ -31,19 +35,39 @@ function App() {
       console.log("Received from server:", event.data);
       setIsTyping(false);
 
-      setMessages((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
-          // Clone the last message
-          let lastMessage = { ...prev[prev.length - 1] };
-          // Append the new data directly without adding an extra space
-          lastMessage.text += event.data;
+      const processMessage = (text) => {
+        const parts = text.split(/(```[\s\S]*?```)/g);
+        return parts.map((part, index) => {
+          if (part.startsWith("```")) {
+            const languageMatch = part.match(/^```(\w+)/);
+            const language = languageMatch ? languageMatch[1] : "";
+            const code = part.replace(/```[\s\S]*?\n/, "").replace(/```$/, "");
+            return (
+              <pre key={index} className={`language-${language}`}>
+                <code className={`language-${language}`}>{code.trim()}</code>
+              </pre>
+            );
+          }
+          return <span key={index}>{part}</span>;
+        });
+      };
 
-          // Return a new array with the updated last message
+      setMessages((prev) => {
+        const newMessage = {
+          text: event.data,
+          sender: "server",
+          components: processMessage(event.data),
+        };
+
+        if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
+          const lastMessage = { ...prev[prev.length - 1] };
+          lastMessage.components = [
+            ...lastMessage.components,
+            ...newMessage.components,
+          ];
           return [...prev.slice(0, -1), lastMessage];
-        } else {
-          // If there's no last server message, create a new one
-          return [...prev, { text: event.data, sender: "server" }];
         }
+        return [...prev, newMessage];
       });
     };
 
@@ -66,21 +90,42 @@ function App() {
     setSocket(ws);
   };
 
+  const processMessage = (text) => {
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith("```")) {
+        const languageMatch = part.match(/^```(\w+)/);
+        const language = languageMatch ? languageMatch[1] : "";
+        const code = part.replace(/```[\s\S]*?\n/, "").replace(/```$/, "");
+        return (
+          <pre key={index} className={`language-${language}`}>
+            <code className={`language-${language}`}>{code.trim()}</code>
+          </pre>
+        );
+      }
+      return <span key={index}>{part}</span>;
+    });
+  };
+
   const sendMessage = () => {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      // Send the message to the server
-      socket.send(inputMessage);
-      // Add it to our local messages
-      setMessages((prev) => [...prev, { text: inputMessage, sender: "me" }]);
-      // Clear the input field
-      setInputMessage("");
-      setIsTyping(true);
-    } else {
-      // If not connected, handle accordingly
+      // Process user's message for code blocks
+      const processedComponents = processMessage(inputMessage);
+
+      // Add processed message to state
       setMessages((prev) => [
         ...prev,
-        { text: "WebSocket is not open", sender: "server" },
+        {
+          text: inputMessage,
+          sender: "me",
+          components: processedComponents,
+        },
       ]);
+
+      // Send raw text to server
+      socket.send(inputMessage);
+      setInputMessage("");
+      setIsTyping(true);
     }
   };
 
@@ -90,6 +135,10 @@ function App() {
       sendMessage();
     }
   };
+
+  useEffect(() => {
+    Prism.highlightAll();
+  }, [messages]);
 
   // Auto-scroll to the bottom whenever messages change
   useEffect(() => {
@@ -114,7 +163,7 @@ function App() {
             key={index}
             className={`message-row ${msg.sender === "me" ? "me" : "server"}`}
           >
-            <div className="message-bubble">{msg.text}</div>
+            <div className="message-bubble">{msg.components || msg.text}</div>
           </div>
         ))}
         {/* Typing Indicator */}
@@ -131,12 +180,13 @@ function App() {
 
       {/* Footer input */}
       <div className="chat-footer">
-        <input
-          type="text"
+        <textarea
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your message..."
+          rows={1} // Start with single line
+          className="message-input"
         />
         <button onClick={sendMessage}>Send</button>
       </div>
