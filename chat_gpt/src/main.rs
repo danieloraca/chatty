@@ -4,6 +4,7 @@ use async_openai::types::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
+use futures::StreamExt;
 
 use dotenvy::dotenv;
 
@@ -76,16 +77,35 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .build()
         .unwrap();
 
-    match client.chat().create(chat_request).await {
-        Ok(response) => response
-            .choices
-            .first()
-            .map(|c| c.message.content.clone().unwrap_or_default())
-            .unwrap_or_default(),
-        Err(e) => {
-            eprintln!("Error calling OpenAI API: {e}");
-            "Oops, something went wrong.".to_string()
+    // Create a streamed response
+    let mut stream = client
+        .chat()
+        .create_stream(chat_request)
+        .await
+        .expect("Failed to create stream");
+
+    let mut full_response = String::new();
+
+    while let Some(response) = stream.next().await {
+        match response {
+            Ok(chat_response) => {
+                for choice in chat_response.choices {
+                    if let Some(content) = choice.delta.content {
+                        full_response.push_str(&content);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Stream error: {:?}", e);
+                break;
+            }
         }
+    }
+
+    if full_response.is_empty() {
+        "Oops, something went wrong.".to_string()
+    } else {
+        full_response
     }
 }
 

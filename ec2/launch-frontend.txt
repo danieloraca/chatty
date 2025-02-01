@@ -1,0 +1,15 @@
+sudo vi /etc/systemd/system/react-frontend.service
+
+[Unit]
+Description=React Frontend
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/chatty/websocket-client
+ExecStart=/usr/bin/npm start
+Restart=always
+Environment="PORT=3000"
+Environment="PATH=/usr/bin:/usr/local/bin:/home/ec2-user/.nvm/versions/node/v20.x.x/bin"
+
+[Install]
+WantedBy=multi-user.target
