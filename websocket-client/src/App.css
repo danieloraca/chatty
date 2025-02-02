@@ -185,3 +185,25 @@
 .message-row.me .token {
     color: #88cc88 !important; /* Greenish syntax highlighting */
 }
+
+.message-row.server:not(.complete) .message-bubble {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.8;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+/* Add final state when complete */
+.message-row.server.complete .message-bubble {
+    animation: none;
+    opacity: 1;
+}

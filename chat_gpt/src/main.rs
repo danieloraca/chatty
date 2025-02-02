@@ -4,13 +4,13 @@ use async_openai::types::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
+use futures::StreamExt;
 
 use dotenvy::dotenv;
-use serde::{Deserialize, Serialize};
 
-use surrealdb::opt::auth::Root;
-use surrealdb::RecordId;
-use surrealdb::Surreal;
+// use surrealdb::opt::auth::Root;
+// use surrealdb::RecordId;
+// use surrealdb::Surreal;
 
 use axum::extract::State;
 use axum::{
@@ -20,11 +20,6 @@ use axum::{
 use axum::{routing::get, Router};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::LazyLock;
-use surrealdb::engine::remote::ws::Client as SurrealClient;
-use surrealdb::engine::remote::ws::Ws;
-
-static DB: LazyLock<Surreal<SurrealClient>> = LazyLock::new(Surreal::init);
 
 #[derive(Clone)]
 pub enum Response {
@@ -37,51 +32,11 @@ struct AppState {
     client: Arc<Client<OpenAIConfig>>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct MessageRecord {
-    content: String,
-    sender: String,
-    timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChatMessage {
-    // You can expand these fields or rename them
-    pub role: String,    // e.g. "user" or "assistant"
-    pub content: String, // the message text
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub id: Option<RecordId>, // SurrealDB auto-generated ID
-}
-
 async fn websocket_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
-}
-
-async fn save_message(role: String, content: String) {
-    let user_msg = ChatMessage {
-        role,
-        content,
-        timestamp: chrono::Utc::now(),
-        id: None,
-    };
-
-    let create_user_message: Result<std::option::Option<ChatMessage>, surrealdb::Error> =
-        DB.create("messages").content(user_msg).await;
-
-    match create_user_message {
-        Ok(Some(record)) => {
-            println!("Inserted record with ID {:?}", record.id);
-        }
-        Ok(None) => {
-            println!("No record returned (check your Surreal schema).");
-        }
-        Err(e) => {
-            eprintln!("Error saving user message: {}", e);
-        }
-    }
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
@@ -91,8 +46,6 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         if let Message::Text(text) = msg {
             println!("Received from client: {}", text);
 
-            save_message("user".to_string(), text.clone()).await;
-
             // Call OpenAI API
             let response = call_openai(&state.client, text.clone()).await;
 
@@ -100,8 +53,6 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             if let Err(e) = socket.send(Message::Text(response.clone())).await {
                 eprintln!("Error sending message: {e}");
             }
-
-            save_message("assistant".to_string(), response).await;
         }
     }
 
@@ -126,32 +77,41 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .build()
         .unwrap();
 
-    match client.chat().create(chat_request).await {
-        Ok(response) => response
-            .choices
-            .first()
-            .map(|c| c.message.content.clone().unwrap_or_default())
-            .unwrap_or_default(),
-        Err(e) => {
-            eprintln!("Error calling OpenAI API: {e}");
-            "Oops, something went wrong.".to_string()
+    // Create a streamed response
+    let mut stream = client
+        .chat()
+        .create_stream(chat_request)
+        .await
+        .expect("Failed to create stream");
+
+    let mut full_response = String::new();
+
+    while let Some(response) = stream.next().await {
+        match response {
+            Ok(chat_response) => {
+                for choice in chat_response.choices {
+                    if let Some(content) = choice.delta.content {
+                        full_response.push_str(&content);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Stream error: {:?}", e);
+                break;
+            }
         }
+    }
+
+    if full_response.is_empty() {
+        "Oops, something went wrong.".to_string()
+    } else {
+        full_response
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
-
-    DB.connect::<Ws>("localhost:8678").await?;
-
-    DB.signin(Root {
-        username: "root",
-        password: "root",
-    })
-    .await?;
-
-    DB.use_ns("test").use_db("test").await?;
 
     //next-gen-ai thingy
     let api_key = std::env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY in .env");
