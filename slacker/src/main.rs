@@ -18,7 +18,7 @@ use reqwest::Client as HttpClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SlackEvent {
     #[serde(rename = "type")]
     event_type: Option<String>,
@@ -26,7 +26,7 @@ struct SlackEvent {
     event: Option<SlackMessageEvent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SlackMessageEvent {
     text: String,
     user: String,
