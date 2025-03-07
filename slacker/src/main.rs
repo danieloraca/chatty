@@ -1,10 +1,10 @@
-use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_openai::types::{
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
     CreateChatCompletionRequestArgs,
 };
-use axum::{Json, Router, routing::get, routing::post};
+use async_openai::Client;
+use axum::{routing::get, routing::post, Json, Router};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -63,10 +63,14 @@ async fn slack_event_handler(
     State(state): State<AppState>, // Correctly extract State
     Json(payload): Json<SlackEvent>,
 ) -> impl IntoResponse {
+    println!("Received Slack event...");
+    // Handle Slack URL verification request
     if let Some(challenge) = payload.challenge {
+        println!("Received challenge: {}", challenge);
         return Json(serde_json::json!({ "challenge": challenge }));
     }
 
+    // Process normal Slack events (messages)
     if let Some(event) = payload.event {
         if event.msg_type == "message" {
             println!("Received message: {}", event.text);
