@@ -63,17 +63,23 @@ async fn slack_event_handler(
     State(state): State<AppState>, // Correctly extract State
     Json(payload): Json<SlackEvent>,
 ) -> impl IntoResponse {
-    println!("Received Slack event...");
-    // Handle Slack URL verification request
+    // Print the entire event for debugging
+    println!(
+        "Received Slack event: {:?}",
+        serde_json::to_string(&payload).unwrap()
+    );
+
     if let Some(challenge) = payload.challenge {
-        println!("Received challenge: {}", challenge);
+        println!("Received Slack challenge: {}", challenge);
         return Json(serde_json::json!({ "challenge": challenge }));
     }
 
-    // Process normal Slack events (messages)
     if let Some(event) = payload.event {
+        // Log the event type and message type for debugging
+        println!("Event type: {}", event.msg_type);
+
         if event.msg_type == "message" {
-            println!("Received message: {}", event.text);
+            println!("Processing message: {}", event.text);
 
             let response = call_openai(&state.client, event.text).await;
 
@@ -86,14 +92,21 @@ async fn slack_event_handler(
             };
 
             // Send response back to Slack
-            let _ = slack_client
+            let res = slack_client
                 .post("https://slack.com/api/chat.postMessage")
                 .bearer_auth(slack_token)
                 .json(&slack_response)
                 .send()
                 .await;
 
+            match res {
+                Ok(_) => println!("Message sent to Slack successfully."),
+                Err(e) => eprintln!("Failed to send message to Slack: {:?}", e),
+            }
+
             return Json(serde_json::json!({ "status": "ok" }));
+        } else {
+            println!("Event type is not a message, ignoring.");
         }
     }
 
