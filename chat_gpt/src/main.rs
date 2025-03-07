@@ -64,7 +64,7 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .model("gpt-4")
         .messages(vec![
             ChatCompletionRequestSystemMessageArgs::default()
-                .content("You are a helpful assistant.")
+                .content("You are a helpful but very snarky assistant.")
                 .build()
                 .unwrap()
                 .into(),
@@ -125,7 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/ws", get(websocket_handler))
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3456));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3456));
     println!("Listening on {}", addr);
 
     axum_server::bind(addr)
