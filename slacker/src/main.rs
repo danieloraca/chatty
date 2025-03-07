@@ -21,7 +21,7 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 struct SlackEvent {
     #[serde(rename = "type")]
-    event_type: String,
+    event_type: Option<String>,
     challenge: Option<String>, // For Slack URL verification
     event: Option<SlackMessageEvent>,
 }
