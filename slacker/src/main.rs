@@ -71,27 +71,22 @@ async fn slack_event_handler(
         serde_json::to_string(&payload).unwrap()
     );
 
+    // Handle URL verification
     if payload.event_type.as_deref() == Some("url_verification") {
         if let Some(challenge) = payload.challenge {
             println!("Received Slack challenge: {}", challenge);
             return Json(serde_json::json!({ "challenge": challenge }));
+        } else {
+            println!("URL verification missing challenge field");
         }
     }
 
-    if let Some(challenge) = payload.challenge {
-        println!("Received Slack challenge: {}", challenge);
-        return Json(serde_json::json!({ "challenge": challenge }));
-    }
-
+    // Handle message events
     if let Some(event) = payload.event {
-        // Log the event type and message type for debugging
         println!("Event type: {}", event.msg_type);
-
         if event.msg_type == "message" {
             println!("Processing message: {}", event.text);
-
             let response = call_openai(&state.client, event.text).await;
-
             let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
@@ -100,7 +95,6 @@ async fn slack_event_handler(
                 channel: event.channel,
             };
 
-            // Send response back to Slack
             let res = slack_client
                 .post("https://slack.com/api/chat.postMessage")
                 .bearer_auth(slack_token)
@@ -114,11 +108,10 @@ async fn slack_event_handler(
             }
 
             return Json(serde_json::json!({ "status": "ok" }));
-        } else {
-            println!("Event type is not a message, ignoring.");
         }
     }
 
+    println!("Ignoring unknown event: {:?}", payload.event_type);
     Json(serde_json::json!({ "status": "ignored" }))
 }
 
