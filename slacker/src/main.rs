@@ -18,7 +18,7 @@ use reqwest::Client as HttpClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 struct SlackEvent {
     #[serde(rename = "type")]
     event_type: Option<String>,
@@ -26,7 +26,7 @@ struct SlackEvent {
     event: Option<SlackMessageEvent>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 struct SlackMessageEvent {
     text: String,
     user: String,
@@ -63,11 +63,20 @@ async fn slack_event_handler(
     State(state): State<AppState>, // Correctly extract State
     Json(payload): Json<SlackEvent>,
 ) -> impl IntoResponse {
+    println!("Raw payload: {:?}", payload);
+
     // Print the entire event for debugging
     println!(
         "Received Slack event: {:?}",
         serde_json::to_string(&payload).unwrap()
     );
+
+    if payload.event_type.as_deref() == Some("url_verification") {
+        if let Some(challenge) = payload.challenge {
+            println!("Received Slack challenge: {}", challenge);
+            return Json(serde_json::json!({ "challenge": challenge }));
+        }
+    }
 
     if let Some(challenge) = payload.challenge {
         println!("Received Slack challenge: {}", challenge);
