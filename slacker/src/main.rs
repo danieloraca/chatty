@@ -97,7 +97,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                         .unwrap()
                         .into(),
                     ChatCompletionRequestUserMessageArgs::default()
-                        .content(&*event.text) // Dereference String to &str
+                        .content(&*event.text)
                         .build()
                         .unwrap()
                         .into(),
@@ -125,6 +125,9 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 }
             };
 
+            let mut buffer = String::new();
+            const BATCH_SIZE: usize = 1000; // Batch ~1000 chars or sentence end
+
             while let Some(result) = tokio::time::timeout(Duration::from_secs(300), stream.next())
                 .await
                 .unwrap_or(None)
@@ -134,26 +137,50 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                         for choice in chat_response.choices {
                             if let Some(content) = choice.delta.content {
                                 println!("Stream chunk: {}", content);
-                                let slack_response = SlackResponse {
-                                    text: content,
-                                    channel: event.channel.clone(),
-                                };
-                                let res = state
-                                    .slack_client
-                                    .post("https://slack.com/api/chat.postMessage")
-                                    .bearer_auth(&slack_token)
-                                    .json(&slack_response)
-                                    .send()
-                                    .await;
-                                match res {
-                                    Ok(_) => println!("Chunk sent to Slack successfully."),
-                                    Err(e) => eprintln!("Failed to send chunk to Slack: {:?}", e),
+                                buffer.push_str(&content);
+
+                                // Send if buffer hits size or ends with a sentence
+                                if buffer.len() >= BATCH_SIZE
+                                    || (buffer.ends_with('.') && buffer.len() > 100)
+                                {
+                                    let slack_response = SlackResponse {
+                                        text: buffer.clone(),
+                                        channel: event.channel.clone(),
+                                    };
+                                    let res = state
+                                        .slack_client
+                                        .post("https://slack.com/api/chat.postMessage")
+                                        .bearer_auth(&slack_token)
+                                        .json(&slack_response)
+                                        .send()
+                                        .await;
+                                    match res {
+                                        Ok(_) => println!("Batch sent to Slack successfully."),
+                                        Err(e) => {
+                                            eprintln!("Failed to send batch to Slack: {:?}", e)
+                                        }
+                                    }
+                                    buffer.clear(); // Reset buffer after sending
                                 }
                             }
                         }
                     }
                     Err(e) => {
                         eprintln!("Stream error: {:?}", e);
+                        if !buffer.is_empty() {
+                            let slack_response = SlackResponse {
+                                text: buffer.clone(),
+                                channel: event.channel.clone(),
+                            };
+                            state
+                                .slack_client
+                                .post("https://slack.com/api/chat.postMessage")
+                                .bearer_auth(&slack_token)
+                                .json(&slack_response)
+                                .send()
+                                .await
+                                .ok();
+                        }
                         let slack_response = SlackResponse {
                             text: format!("Stream interrupted: {:?}", e),
                             channel: event.channel.clone(),
@@ -168,6 +195,25 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                             .ok();
                         break;
                     }
+                }
+            }
+
+            // Send any remaining buffer
+            if !buffer.is_empty() {
+                let slack_response = SlackResponse {
+                    text: buffer,
+                    channel: event.channel.clone(),
+                };
+                let res = state
+                    .slack_client
+                    .post("https://slack.com/api/chat.postMessage")
+                    .bearer_auth(&slack_token)
+                    .json(&slack_response)
+                    .send()
+                    .await;
+                match res {
+                    Ok(_) => println!("Final batch sent to Slack successfully."),
+                    Err(e) => eprintln!("Failed to send final batch to Slack: {:?}", e),
                 }
             }
 
