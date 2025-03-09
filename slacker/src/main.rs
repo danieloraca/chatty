@@ -4,18 +4,14 @@ use async_openai::types::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
-use axum::{routing::get, routing::post, Json, Router};
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
-
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-};
+use axum::response::IntoResponse; // Added this
+use axum::{routing::post, Json, Router};
 use dotenvy::dotenv;
+use futures::StreamExt;
 use reqwest::Client as HttpClient;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +20,7 @@ use std::time::Duration;
 struct SlackEvent {
     #[serde(rename = "type")]
     event_type: Option<String>,
-    challenge: Option<String>, // For Slack URL verification
+    challenge: Option<String>,
     event: Option<SlackMessageEvent>,
 }
 
@@ -46,22 +42,9 @@ struct SlackResponse {
 }
 
 #[derive(Clone)]
-pub enum Response {
-    Do(String),
-    Say(String),
-}
-
-#[derive(Clone)]
 struct AppState {
     client: Arc<Client<OpenAIConfig>>,
 }
-
-// async fn websocket_handler(
-//     State(state): State<AppState>,
-//     ws: WebSocketUpgrade,
-// ) -> impl IntoResponse {
-//     ws.on_upgrade(move |socket| handle_socket(socket, state))
-// }
 
 async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
     let body_str = String::from_utf8_lossy(&body);
@@ -84,8 +67,6 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
         if let Some(challenge) = payload.challenge {
             println!("Received Slack challenge: {}", challenge);
             return Json(serde_json::json!({ "challenge": challenge }));
-        } else {
-            println!("URL verification missing challenge field");
         }
     }
 
@@ -105,11 +86,9 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
 
             println!("Processing message: {}", event.text);
             let response = call_openai(&state.client, event.text).await;
-            println!("OpenAI response: {:?}", response); // Log the response
             let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
-            // Split response into 4000-char chunks
             let mut chunks = Vec::new();
             let mut remaining = response.as_str();
             while !remaining.is_empty() {
@@ -123,7 +102,6 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 remaining = rest.trim_start();
             }
 
-            // Send each chunk
             for (i, chunk) in chunks.iter().enumerate() {
                 let slack_response = SlackResponse {
                     text: if chunks.len() > 1 {
@@ -155,26 +133,6 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
     Json(serde_json::json!({ "status": "ignored" }))
 }
 
-// async fn handle_socket(mut socket: WebSocket, state: AppState) {
-//     println!("New WebSocket connection established");
-
-//     while let Some(Ok(msg)) = socket.recv().await {
-//         if let Message::Text(text) = msg {
-//             println!("Received from client: {}", text);
-
-//             // Call OpenAI API
-//             let response = call_openai(&state.client, text.clone()).await;
-
-//             // Send response to client
-//             if let Err(e) = socket.send(Message::Text(response.clone())).await {
-//                 eprintln!("Error sending message: {e}");
-//             }
-//         }
-//     }
-
-//     println!("WebSocket connection closed");
-// }
-
 async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> String {
     let chat_request = CreateChatCompletionRequestArgs::default()
         .model("gpt-4")
@@ -202,8 +160,10 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
     };
 
     let mut full_response = String::new();
-    while let Some(result) = tokio::time::timeout(Duration::from_secs(30), stream.next())
+    let timeout_duration = Duration::from_secs(60);
+    while let Some(result) = tokio::time::timeout(timeout_duration, stream.next())
         .await
+        .map_err(|_| "Stream timed out".to_string())
         .unwrap_or(None)
     {
         match result {
@@ -217,7 +177,8 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
             }
             Err(e) => {
                 eprintln!("Stream error: {:?}", e);
-                return format!("Error streaming from OpenAI: {:?}", e);
+                full_response.push_str(&format!("\n[Stream interrupted: {:?}]", e));
+                break;
             }
         }
     }
@@ -232,11 +193,9 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-
     let api_key = std::env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY in .env");
     let config = OpenAIConfig::new().with_api_key(api_key);
     let client = Arc::new(Client::with_config(config));
-
     let state = AppState { client };
 
     let app = Router::new()
