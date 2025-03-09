@@ -104,45 +104,25 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
 
             println!("Processing message: {}", event.text);
             let response = call_openai(&state.client, event.text).await;
+            println!("OpenAI response: {:?}", response); // Log the response
             let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
-            // Split response into 4000-char chunks
-            let mut chunks = Vec::new();
-            let mut remaining = response.as_str();
-            while !remaining.is_empty() {
-                let (chunk, rest) = if remaining.len() > 4000 {
-                    let split_at = remaining[..4000].rfind(' ').unwrap_or(4000);
-                    (&remaining[..split_at], &remaining[split_at..])
-                } else {
-                    (remaining, "")
-                };
-                chunks.push(chunk.to_string());
-                remaining = rest.trim_start();
-            }
+            let slack_response = SlackResponse {
+                text: response,
+                channel: event.channel,
+            };
 
-            // Send each chunk
-            for (i, chunk) in chunks.iter().enumerate() {
-                let slack_response = SlackResponse {
-                    text: if chunks.len() > 1 {
-                        format!("Part {}/{}: {}", i + 1, chunks.len(), chunk)
-                    } else {
-                        chunk.clone()
-                    },
-                    channel: event.channel.clone(),
-                };
+            let res = slack_client
+                .post("https://slack.com/api/chat.postMessage")
+                .bearer_auth(slack_token)
+                .json(&slack_response)
+                .send()
+                .await;
 
-                let res = slack_client
-                    .post("https://slack.com/api/chat.postMessage")
-                    .bearer_auth(&slack_token)
-                    .json(&slack_response)
-                    .send()
-                    .await;
-
-                match res {
-                    Ok(_) => println!("Message part {} sent to Slack successfully.", i + 1),
-                    Err(e) => eprintln!("Failed to send message part {} to Slack: {:?}", i + 1, e),
-                }
+            match res {
+                Ok(_) => println!("Message sent to Slack successfully."),
+                Err(e) => eprintln!("Failed to send message to Slack: {:?}", e),
             }
 
             return Json(serde_json::json!({ "status": "ok" }));
