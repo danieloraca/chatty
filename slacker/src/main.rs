@@ -8,6 +8,7 @@ use axum::{routing::get, routing::post, Json, Router};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -61,15 +62,25 @@ struct AppState {
 
 async fn slack_event_handler(
     State(state): State<AppState>, // Correctly extract State
-    Json(payload): Json<SlackEvent>,
+    body: Bytes,
 ) -> impl IntoResponse {
-    println!("Raw payload: {:?}", payload);
-
-    // Print the entire event for debugging
+    let body_str = String::from_utf8_lossy(&body);
     println!(
-        "Received Slack event: {:?}",
-        serde_json::to_string(&payload).unwrap()
+        "Raw body received at {:?}: {}",
+        chrono::Utc::now(),
+        body_str
     );
+
+    let payload: SlackEvent = serde_json::from_slice(&body).unwrap_or_else(|e| {
+        println!("Deserialization error: {:?}", e);
+        SlackEvent {
+            event_type: None,
+            challenge: None,
+            event: None,
+        }
+    });
+
+    println!("Raw payload: {:?}", payload);
 
     // Handle URL verification
     if payload.event_type.as_deref() == Some("url_verification") {
