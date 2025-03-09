@@ -61,8 +61,8 @@ struct AppState {
 // }
 
 async fn slack_event_handler(
-    State(state): State<AppState>, // Correctly extract State
-    body: Bytes,
+    State(state): State<AppState>,
+    body: Bytes, // Extract raw body as Bytes
 ) -> impl IntoResponse {
     let body_str = String::from_utf8_lossy(&body);
     println!(
@@ -80,9 +80,6 @@ async fn slack_event_handler(
         }
     });
 
-    println!("Raw payload: {:?}", payload);
-
-    // Handle URL verification
     if payload.event_type.as_deref() == Some("url_verification") {
         if let Some(challenge) = payload.challenge {
             println!("Received Slack challenge: {}", challenge);
@@ -92,7 +89,6 @@ async fn slack_event_handler(
         }
     }
 
-    // Handle message events
     if let Some(event) = payload.event {
         println!("Event type: {}", event.msg_type);
         if event.msg_type == "message" {
