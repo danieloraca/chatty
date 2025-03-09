@@ -34,6 +34,8 @@ struct SlackMessageEvent {
     channel: String,
     #[serde(rename = "type")]
     msg_type: String,
+    bot_id: Option<String>,
+    subtype: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -60,10 +62,7 @@ struct AppState {
 //     ws.on_upgrade(move |socket| handle_socket(socket, state))
 // }
 
-async fn slack_event_handler(
-    State(state): State<AppState>,
-    body: Bytes, // Extract raw body as Bytes
-) -> impl IntoResponse {
+async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
     let body_str = String::from_utf8_lossy(&body);
     println!(
         "Raw body received at {:?}: {}",
@@ -92,6 +91,18 @@ async fn slack_event_handler(
     if let Some(event) = payload.event {
         println!("Event type: {}", event.msg_type);
         if event.msg_type == "message" {
+            // Ignore bot messages
+            if event.bot_id.is_some()
+                || event
+                    .subtype
+                    .as_ref()
+                    .map(|s| s == "bot_message")
+                    .unwrap_or(false)
+            {
+                println!("Ignoring bot message: {}", event.text);
+                return Json(serde_json::json!({ "status": "ignored" }));
+            }
+
             println!("Processing message: {}", event.text);
             let response = call_openai(&state.client, event.text).await;
             let slack_client = HttpClient::new();
