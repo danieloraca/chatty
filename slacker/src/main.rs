@@ -158,7 +158,7 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .model("gpt-4")
         .messages(vec![
             ChatCompletionRequestSystemMessageArgs::default()
-                .content("You are a helpful assistant.")
+                .content("You are a helpful assistant but snarky.")
                 .build()
                 .unwrap()
                 .into(),
