@@ -91,7 +91,6 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
     if let Some(event) = payload.event {
         println!("Event type: {}", event.msg_type);
         if event.msg_type == "message" {
-            // Ignore bot messages
             if event.bot_id.is_some()
                 || event
                     .subtype
@@ -105,6 +104,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
 
             println!("Processing message: {}", event.text);
             let response = call_openai(&state.client, event.text).await;
+            println!("OpenAI response: {:?}", response); // Log the response
             let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
@@ -171,33 +171,34 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .build()
         .unwrap();
 
-    // Create a streamed response
-    let mut stream = client
-        .chat()
-        .create_stream(chat_request)
-        .await
-        .expect("Failed to create stream");
+    let mut stream = match client.chat().create_stream(chat_request).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            eprintln!("Failed to create stream: {:?}", e);
+            return format!("Error connecting to OpenAI: {:?}", e);
+        }
+    };
 
     let mut full_response = String::new();
-
-    while let Some(response) = stream.next().await {
-        match response {
+    while let Some(result) = stream.next().await {
+        match result {
             Ok(chat_response) => {
                 for choice in chat_response.choices {
                     if let Some(content) = choice.delta.content {
                         full_response.push_str(&content);
+                        println!("Stream chunk: {}", content); // Optional: log chunks
                     }
                 }
             }
             Err(e) => {
                 eprintln!("Stream error: {:?}", e);
-                break;
+                return format!("Error streaming from OpenAI: {:?}", e);
             }
         }
     }
 
     if full_response.is_empty() {
-        "Oops, something went wrong.".to_string()
+        "No response generated.".to_string()
     } else {
         full_response
     }
