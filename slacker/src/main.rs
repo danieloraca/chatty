@@ -111,7 +111,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
             let convo_key = format!("{}:{}", event.channel, event.user);
             let mut history = state.chat_history.lock().await;
 
-            let messages = history
+            let mut messages = history
                 .entry(convo_key.clone())
                 .or_insert_with(|| {
                     vec![ChatCompletionRequestSystemMessageArgs::default()
@@ -128,11 +128,16 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                     .build()
                     .unwrap()
                     .into();
-            history.get_mut(&convo_key).unwrap().push(user_msg);
+            messages.push(user_msg);
+            history.get_mut(&convo_key).unwrap().clear();
+            history
+                .get_mut(&convo_key)
+                .unwrap()
+                .extend(messages.clone());
 
             let chat_request = CreateChatCompletionRequestArgs::default()
                 .model("gpt-4")
-                .messages(messages)
+                .messages(messages.clone()) // Clone here to keep messages alive
                 .build()
                 .unwrap();
 
@@ -188,7 +193,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                                     match res {
                                         Ok(_) => {
                                             println!("Batch sent to Slack successfully.");
-                                            history.get_mut(&convo_key).unwrap().push(
+                                            messages.push(
                                                 ChatCompletionRequestMessage::Assistant(
                                                     async_openai::types::ChatCompletionRequestAssistantMessage {
                                                         content: Some(ChatCompletionRequestAssistantMessageContent::Text(buffer.clone())),
@@ -196,6 +201,11 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                                                     }
                                                 )
                                             );
+                                            history.get_mut(&convo_key).unwrap().clear();
+                                            history
+                                                .get_mut(&convo_key)
+                                                .unwrap()
+                                                .extend(messages.clone());
                                         }
                                         Err(e) => {
                                             eprintln!("Failed to send batch to Slack: {:?}", e)
@@ -221,18 +231,21 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                                 .send()
                                 .await
                                 .ok();
-                            history.get_mut(&convo_key).unwrap().push(
-                                ChatCompletionRequestMessage::Assistant(
-                                    async_openai::types::ChatCompletionRequestAssistantMessage {
-                                        content: Some(
-                                            ChatCompletionRequestAssistantMessageContent::Text(
-                                                buffer.clone(),
-                                            ),
+                            messages.push(ChatCompletionRequestMessage::Assistant(
+                                async_openai::types::ChatCompletionRequestAssistantMessage {
+                                    content: Some(
+                                        ChatCompletionRequestAssistantMessageContent::Text(
+                                            buffer.clone(),
                                         ),
-                                        ..Default::default()
-                                    },
-                                ),
-                            );
+                                    ),
+                                    ..Default::default()
+                                },
+                            ));
+                            history.get_mut(&convo_key).unwrap().clear();
+                            history
+                                .get_mut(&convo_key)
+                                .unwrap()
+                                .extend(messages.clone());
                         }
                         let slack_response = SlackResponse {
                             text: format!("Stream interrupted: {:?}", e),
@@ -266,16 +279,19 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 match res {
                     Ok(_) => {
                         println!("Final batch sent to Slack successfully.");
-                        history.get_mut(&convo_key).unwrap().push(
-                            ChatCompletionRequestMessage::Assistant(
-                                async_openai::types::ChatCompletionRequestAssistantMessage {
-                                    content: Some(
-                                        ChatCompletionRequestAssistantMessageContent::Text(buffer),
-                                    ),
-                                    ..Default::default()
-                                },
-                            ),
-                        );
+                        messages.push(ChatCompletionRequestMessage::Assistant(
+                            async_openai::types::ChatCompletionRequestAssistantMessage {
+                                content: Some(ChatCompletionRequestAssistantMessageContent::Text(
+                                    buffer.clone(),
+                                )),
+                                ..Default::default()
+                            },
+                        ));
+                        history.get_mut(&convo_key).unwrap().clear();
+                        history
+                            .get_mut(&convo_key)
+                            .unwrap()
+                            .extend(messages.clone());
                     }
                     Err(e) => eprintln!("Failed to send final batch to Slack: {:?}", e),
                 }
