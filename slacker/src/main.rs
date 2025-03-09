@@ -18,6 +18,7 @@ use dotenvy::dotenv;
 use reqwest::Client as HttpClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Deserialize, Serialize, Debug)]
 struct SlackEvent {
@@ -179,7 +180,7 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .model("gpt-4")
         .messages(vec![
             ChatCompletionRequestSystemMessageArgs::default()
-                .content("You are a helpful assistant but snarky.")
+                .content("You are a helpful assistant.")
                 .build()
                 .unwrap()
                 .into(),
@@ -201,13 +202,16 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
     };
 
     let mut full_response = String::new();
-    while let Some(result) = stream.next().await {
+    while let Some(result) = tokio::time::timeout(Duration::from_secs(30), stream.next())
+        .await
+        .unwrap_or(None)
+    {
         match result {
             Ok(chat_response) => {
                 for choice in chat_response.choices {
                     if let Some(content) = choice.delta.content {
                         full_response.push_str(&content);
-                        println!("Stream chunk: {}", content); // Optional: log chunks
+                        println!("Stream chunk: {}", content);
                     }
                 }
             }
