@@ -110,7 +110,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 .model("gpt-4")
                 .messages(vec![
                     ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a helpful assistant.")
+                        .content("You are a snarky assistant.")
                         .build()
                         .unwrap()
                         .into(),
