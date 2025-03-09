@@ -110,7 +110,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 .model("gpt-4")
                 .messages(vec![
                     ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a snarky assistant.")
+                        .content("You are a snarky but helpful assistant.")
                         .build()
                         .unwrap()
                         .into(),
@@ -160,7 +160,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
 
                                 // Send if buffer is big enough or ends with a sentence
                                 if buffer.len() >= BATCH_SIZE
-                                //|| (buffer.ends_with('.') && buffer.len() >= MIN_BATCH_SIZE)
+                                    || (buffer.ends_with('.') && buffer.len() >= MIN_BATCH_SIZE)
                                 {
                                     let slack_response = SlackResponse {
                                         text: buffer.clone(),
