@@ -44,6 +44,7 @@ struct SlackResponse {
 #[derive(Clone)]
 struct AppState {
     client: Arc<Client<OpenAIConfig>>,
+    slack_client: HttpClient,
 }
 
 async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
@@ -85,44 +86,88 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
             }
 
             println!("Processing message: {}", event.text);
-            let response = call_openai(&state.client, event.text).await;
-            println!("Full response received: {}", response);
-            let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
-            let mut chunks = Vec::new();
-            let mut remaining = response.as_str();
-            while !remaining.is_empty() {
-                let (chunk, rest) = if remaining.len() > 4000 {
-                    let split_at = remaining[..4000].rfind(' ').unwrap_or(4000);
-                    (&remaining[..split_at], &remaining[split_at..])
-                } else {
-                    (remaining, "")
-                };
-                chunks.push(chunk.to_string());
-                remaining = rest.trim_start();
-            }
+            let chat_request = CreateChatCompletionRequestArgs::default()
+                .model("gpt-4")
+                .messages(vec![
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content("You are a helpful assistant.")
+                        .build()
+                        .unwrap()
+                        .into(),
+                    ChatCompletionRequestUserMessageArgs::default()
+                        .content(&*event.text) // Dereference String to &str
+                        .build()
+                        .unwrap()
+                        .into(),
+                ])
+                .build()
+                .unwrap();
 
-            for (i, chunk) in chunks.iter().enumerate() {
-                let slack_response = SlackResponse {
-                    text: if chunks.len() > 1 {
-                        format!("Part {}/{}: {}", i + 1, chunks.len(), chunk)
-                    } else {
-                        chunk.clone()
-                    },
-                    channel: event.channel.clone(),
-                };
+            let mut stream = match state.client.chat().create_stream(chat_request).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    eprintln!("Failed to create stream: {:?}", e);
+                    let slack_response = SlackResponse {
+                        text: format!("Error connecting to OpenAI: {:?}", e),
+                        channel: event.channel.clone(),
+                    };
+                    state
+                        .slack_client
+                        .post("https://slack.com/api/chat.postMessage")
+                        .bearer_auth(&slack_token)
+                        .json(&slack_response)
+                        .send()
+                        .await
+                        .ok();
+                    return Json(serde_json::json!({ "status": "error" }));
+                }
+            };
 
-                let res = slack_client
-                    .post("https://slack.com/api/chat.postMessage")
-                    .bearer_auth(&slack_token)
-                    .json(&slack_response)
-                    .send()
-                    .await;
-
-                match res {
-                    Ok(_) => println!("Message part {} sent to Slack successfully.", i + 1),
-                    Err(e) => eprintln!("Failed to send message part {} to Slack: {:?}", i + 1, e),
+            while let Some(result) = tokio::time::timeout(Duration::from_secs(300), stream.next())
+                .await
+                .unwrap_or(None)
+            {
+                match result {
+                    Ok(chat_response) => {
+                        for choice in chat_response.choices {
+                            if let Some(content) = choice.delta.content {
+                                println!("Stream chunk: {}", content);
+                                let slack_response = SlackResponse {
+                                    text: content,
+                                    channel: event.channel.clone(),
+                                };
+                                let res = state
+                                    .slack_client
+                                    .post("https://slack.com/api/chat.postMessage")
+                                    .bearer_auth(&slack_token)
+                                    .json(&slack_response)
+                                    .send()
+                                    .await;
+                                match res {
+                                    Ok(_) => println!("Chunk sent to Slack successfully."),
+                                    Err(e) => eprintln!("Failed to send chunk to Slack: {:?}", e),
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Stream error: {:?}", e);
+                        let slack_response = SlackResponse {
+                            text: format!("Stream interrupted: {:?}", e),
+                            channel: event.channel.clone(),
+                        };
+                        state
+                            .slack_client
+                            .post("https://slack.com/api/chat.postMessage")
+                            .bearer_auth(&slack_token)
+                            .json(&slack_response)
+                            .send()
+                            .await
+                            .ok();
+                        break;
+                    }
                 }
             }
 
@@ -134,82 +179,17 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
     Json(serde_json::json!({ "status": "ignored" }))
 }
 
-async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> String {
-    let chat_request = CreateChatCompletionRequestArgs::default()
-        .model("gpt-4")
-        .messages(vec![
-            ChatCompletionRequestSystemMessageArgs::default()
-                .content("You are a helpful assistant.")
-                .build()
-                .unwrap()
-                .into(),
-            ChatCompletionRequestUserMessageArgs::default()
-                .content(user_input)
-                .build()
-                .unwrap()
-                .into(),
-        ])
-        .build()
-        .unwrap();
-
-    // Try streaming with a total timeout
-    let stream_result = tokio::time::timeout(Duration::from_secs(300), async {
-        let mut stream = match client.chat().create_stream(chat_request.clone()).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                eprintln!("Failed to create stream: {:?}", e);
-                return Err(e.to_string());
-            }
-        };
-
-        let mut full_response = String::new();
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(chat_response) => {
-                    for choice in chat_response.choices {
-                        if let Some(content) = choice.delta.content {
-                            full_response.push_str(&content);
-                            println!("Stream chunk: {}", content);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Stream error: {:?}", e);
-                    return Err(e.to_string());
-                }
-            }
-        }
-        Ok(full_response)
-    })
-    .await;
-
-    match stream_result {
-        Ok(Ok(response)) if !response.is_empty() => response,
-        _ => {
-            // Fallback to non-streaming if streaming fails or times out
-            println!("Streaming failed or timed out, falling back to non-streaming...");
-            match client.chat().create(chat_request).await {
-                Ok(response) => response.choices[0]
-                    .message
-                    .content
-                    .clone()
-                    .unwrap_or_else(|| "No content returned.".to_string()),
-                Err(e) => {
-                    eprintln!("Non-streaming OpenAI error: {:?}", e);
-                    format!("Error calling OpenAI: {:?}", e)
-                }
-            }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     dotenv().ok();
     let api_key = std::env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY in .env");
     let config = OpenAIConfig::new().with_api_key(api_key);
     let client = Arc::new(Client::with_config(config));
-    let state = AppState { client };
+    let slack_client = HttpClient::new();
+    let state = AppState {
+        client,
+        slack_client,
+    };
 
     let app = Router::new()
         .route("/slack/events", post(slack_event_handler))
