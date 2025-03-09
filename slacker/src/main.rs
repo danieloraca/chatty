@@ -6,7 +6,7 @@ use async_openai::types::{
 use async_openai::Client;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::response::IntoResponse; // Added this
+use axum::response::IntoResponse;
 use axum::{routing::post, Json, Router};
 use dotenvy::dotenv;
 use futures::StreamExt;
@@ -86,6 +86,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
 
             println!("Processing message: {}", event.text);
             let response = call_openai(&state.client, event.text).await;
+            println!("Full response received: {}", response);
             let slack_client = HttpClient::new();
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
 
@@ -151,42 +152,54 @@ async fn call_openai(client: &Client<OpenAIConfig>, user_input: String) -> Strin
         .build()
         .unwrap();
 
-    let mut stream = match client.chat().create_stream(chat_request).await {
-        Ok(stream) => stream,
-        Err(e) => {
-            eprintln!("Failed to create stream: {:?}", e);
-            return format!("Error connecting to OpenAI: {:?}", e);
-        }
-    };
+    // Try streaming with a total timeout
+    let stream_result = tokio::time::timeout(Duration::from_secs(300), async {
+        let mut stream = match client.chat().create_stream(chat_request.clone()).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                eprintln!("Failed to create stream: {:?}", e);
+                return Err(e.to_string());
+            }
+        };
 
-    let mut full_response = String::new();
-    let timeout_duration = Duration::from_secs(60);
-    while let Some(result) = tokio::time::timeout(timeout_duration, stream.next())
-        .await
-        .map_err(|_| "Stream timed out".to_string())
-        .unwrap_or(None)
-    {
-        match result {
-            Ok(chat_response) => {
-                for choice in chat_response.choices {
-                    if let Some(content) = choice.delta.content {
-                        full_response.push_str(&content);
-                        println!("Stream chunk: {}", content);
+        let mut full_response = String::new();
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(chat_response) => {
+                    for choice in chat_response.choices {
+                        if let Some(content) = choice.delta.content {
+                            full_response.push_str(&content);
+                            println!("Stream chunk: {}", content);
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                eprintln!("Stream error: {:?}", e);
-                full_response.push_str(&format!("\n[Stream interrupted: {:?}]", e));
-                break;
+                Err(e) => {
+                    eprintln!("Stream error: {:?}", e);
+                    return Err(e.to_string());
+                }
             }
         }
-    }
+        Ok(full_response)
+    })
+    .await;
 
-    if full_response.is_empty() {
-        "No response generated.".to_string()
-    } else {
-        full_response
+    match stream_result {
+        Ok(Ok(response)) if !response.is_empty() => response,
+        _ => {
+            // Fallback to non-streaming if streaming fails or times out
+            println!("Streaming failed or timed out, falling back to non-streaming...");
+            match client.chat().create(chat_request).await {
+                Ok(response) => response.choices[0]
+                    .message
+                    .content
+                    .clone()
+                    .unwrap_or_else(|| "No content returned.".to_string()),
+                Err(e) => {
+                    eprintln!("Non-streaming OpenAI error: {:?}", e);
+                    format!("Error calling OpenAI: {:?}", e)
+                }
+            }
+        }
     }
 }
 
