@@ -12,6 +12,7 @@ use dotenvy::dotenv;
 use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +23,7 @@ struct SlackEvent {
     event_type: Option<String>,
     challenge: Option<String>,
     event: Option<SlackMessageEvent>,
+    event_id: Option<String>, // For deduplication
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -45,6 +47,7 @@ struct SlackResponse {
 struct AppState {
     client: Arc<Client<OpenAIConfig>>,
     slack_client: HttpClient,
+    processed_events: Arc<tokio::sync::Mutex<HashSet<String>>>, // Track processed event IDs
 }
 
 async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
@@ -61,6 +64,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
             event_type: None,
             challenge: None,
             event: None,
+            event_id: None,
         }
     });
 
@@ -84,6 +88,20 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 println!("Ignoring bot message: {}", event.text);
                 return Json(serde_json::json!({ "status": "ignored" }));
             }
+
+            // Deduplicate events
+            let event_id = payload
+                .event_id
+                .as_ref()
+                .unwrap_or(&"unknown".to_string())
+                .clone();
+            let mut processed = state.processed_events.lock().await;
+            if processed.contains(&event_id) {
+                println!("Duplicate event ignored: {}", event_id);
+                return Json(serde_json::json!({ "status": "ignored" }));
+            }
+            processed.insert(event_id.clone());
+            println!("Processing event ID: {}", event_id);
 
             println!("Processing message: {}", event.text);
             let slack_token = std::env::var("SLACK_BOT_TOKEN").expect("Missing SLACK_BOT_TOKEN");
@@ -126,7 +144,8 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
             };
 
             let mut buffer = String::new();
-            const BATCH_SIZE: usize = 1000; // Batch ~1000 chars or sentence end
+            const BATCH_SIZE: usize = 1000; // ~1000 chars or sentence end
+            const MIN_BATCH_SIZE: usize = 100; // Avoid tiny batches
 
             while let Some(result) = tokio::time::timeout(Duration::from_secs(300), stream.next())
                 .await
@@ -139,9 +158,9 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                                 println!("Stream chunk: {}", content);
                                 buffer.push_str(&content);
 
-                                // Send if buffer hits size or ends with a sentence
+                                // Send if buffer is big enough or ends with a sentence
                                 if buffer.len() >= BATCH_SIZE
-                                    || (buffer.ends_with('.') && buffer.len() > 100)
+                                    || (buffer.ends_with('.') && buffer.len() >= MIN_BATCH_SIZE)
                                 {
                                     let slack_response = SlackResponse {
                                         text: buffer.clone(),
@@ -160,7 +179,7 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                                             eprintln!("Failed to send batch to Slack: {:?}", e)
                                         }
                                     }
-                                    buffer.clear(); // Reset buffer after sending
+                                    buffer.clear();
                                 }
                             }
                         }
@@ -198,7 +217,6 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 }
             }
 
-            // Send any remaining buffer
             if !buffer.is_empty() {
                 let slack_response = SlackResponse {
                     text: buffer,
@@ -232,9 +250,11 @@ async fn main() {
     let config = OpenAIConfig::new().with_api_key(api_key);
     let client = Arc::new(Client::with_config(config));
     let slack_client = HttpClient::new();
+    let processed_events = Arc::new(tokio::sync::Mutex::new(HashSet::new()));
     let state = AppState {
         client,
         slack_client,
+        processed_events,
     };
 
     let app = Router::new()
