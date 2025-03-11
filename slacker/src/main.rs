@@ -115,7 +115,9 @@ async fn slack_event_handler(State(state): State<AppState>, body: Bytes) -> impl
                 .entry(convo_key.clone())
                 .or_insert_with(|| {
                     vec![ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a helpful assistant.")
+                        .content(
+                            "You are a snarky assistant. Respond mainly using glaswegian dialect.",
+                        )
                         .build()
                         .unwrap()
                         .into()]
