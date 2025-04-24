@@ -1,0 +1,15 @@
+sudo vi /etc/systemd/system/rust-chat.service
+
+[Unit]
+Description=Rust Chat Server
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/chatty/chat_gpt
+ExecStart=/home/ec2-user/.cargo/bin/cargo run --release
+Restart=always
+Environment="PORT=3456"
+Environment="OPENAI_API_KEY=your_key_here"
+
+[Install]
+WantedBy=multi-user.target

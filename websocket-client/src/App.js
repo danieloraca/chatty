@@ -32,6 +32,7 @@ function App() {
     };
 
     ws.onmessage = (event) => {
+      const chunk = event.data;
       console.log("Received from server:", event.data);
       setIsTyping(false);
 
@@ -53,21 +54,39 @@ function App() {
       };
 
       setMessages((prev) => {
-        const newMessage = {
-          text: event.data,
-          sender: "server",
-          components: processMessage(event.data),
-        };
+        const lastMessage = prev.length > 0 ? prev[prev.length - 1] : null;
+        if (
+          lastMessage &&
+          lastMessage.sender === "server" &&
+          !lastMessage.complete
+        ) {
+          // Append to existing message
+          const updatedMessage = {
+            ...lastMessage,
+            text: lastMessage.text + chunk,
+            components: processMessage(lastMessage.text + chunk),
+          };
 
-        if (prev.length > 0 && prev[prev.length - 1].sender === "server") {
-          const lastMessage = { ...prev[prev.length - 1] };
-          lastMessage.components = [
-            ...lastMessage.components,
-            ...newMessage.components,
+          // Check if this is the final chunk (you'll need to implement this)
+          if (chunk.endsWith("[DONE]")) {
+            // Example end marker
+            updatedMessage.complete = true;
+            setIsTyping(false);
+          }
+
+          return [...prev.slice(0, -1), updatedMessage];
+        } else {
+          // Start new message
+          return [
+            ...prev,
+            {
+              text: chunk,
+              sender: "server",
+              components: processMessage(chunk),
+              complete: false,
+            },
           ];
-          return [...prev.slice(0, -1), lastMessage];
         }
-        return [...prev, newMessage];
       });
     };
 
